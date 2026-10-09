@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' clip: data:; media-src clip:; style-src 'self'; script-src 'self'">
+  <title>ClipDeck</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark"></span>ClipDeck</div>
+    <nav class="games" id="games"></nav>
+    <div class="sidebar-foot">
+      <div class="sources-summary" id="sourcesSummary"></div>
+      <button class="btn ghost block" id="openSettings">Folders &amp; accounts</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="toolbar">
+      <h1 id="heading">All clips</h1>
+      <input type="search" id="search" placeholder="Search clips" autocomplete="off">
+      <select id="sort" aria-label="Sort">
+        <option value="new">Newest first</option>
+        <option value="old">Oldest first</option>
+        <option value="long">Longest</option>
+        <option value="big">Largest</option>
+      </select>
+      <button class="btn ghost" id="rescan">Rescan</button>
+    </header>
+    <section class="grid" id="grid"></section>
+    <section class="empty" id="empty" hidden>
+      <h2>No clips found yet</h2>
+      <p id="emptyText"></p>
+      <button class="btn primary" id="emptyAdd">Add a clips folder</button>
+    </section>
+  </main>
+
+  <dialog class="player" id="player">
+    <div class="player-stage">
+      <video id="video" controls preload="metadata"></video>
+      <div class="video-note" id="videoNote" hidden></div>
+      <div class="trim" id="trim">
+        <div class="trim-range" id="trimRange"></div>
+        <div class="trim-head" id="trimHead"></div>
+        <div class="trim-handle" id="trimStart" data-edge="0"></div>
+        <div class="trim-handle" id="trimEnd" data-edge="1"></div>
+      </div>
+      <div class="trim-row">
+        <button class="btn ghost small" id="setStart" title="I">Set start</button>
+        <button class="btn ghost small" id="setEnd" title="O">Set end</button>
+        <span class="trim-label" id="trimLabel"></span>
+        <button class="btn ghost small" id="trimReset">Whole clip</button>
+      </div>
+    </div>
+
+    <div class="player-side">
+      <button class="close" id="closePlayer" aria-label="Close">&times;</button>
+      <h2 id="clipTitle"></h2>
+      <p class="muted" id="clipMeta"></p>
+
+      <h3>Share</h3>
+      <button class="btn primary block" id="upStreamable">Upload to Streamable &amp; copy link</button>
+      <div class="split">
+        <button class="btn block" id="discord">Copy for Discord</button>
+        <select id="discordSize" aria-label="Discord file size limit">
+          <option value="10">10 MB</option>
+          <option value="50">50 MB</option>
+          <option value="500">500 MB</option>
+        </select>
+      </div>
+      <button class="btn block" id="upYouTube">Send to YouTube</button>
+
+      <div class="link-row" id="linkRow" hidden>
+        <a href="#" id="linkUrl"></a>
+        <button class="btn small" id="linkCopy">Copy</button>
+      </div>
+
+      <h3>File</h3>
+      <div class="file-actions">
+        <button class="btn small" id="saveTrim">Save trimmed copy</button>
+        <button class="btn small" id="copyFile">Copy file</button>
+        <button class="btn small" id="reveal">Show in folder</button>
+        <button class="btn small danger" id="trash">Delete</button>
+      </div>
+
+      <div class="status" id="status" hidden>
+        <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+        <p id="statusText"></p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="settings" id="settings">
+    <button class="close" id="closeSettings" aria-label="Close">&times;</button>
+    <h2>Folders &amp; accounts</h2>
+
+    <h3>Clip folders</h3>
+    <p class="muted">Checked automatically every time ClipDeck starts.</p>
+    <ul class="source-list" id="sourceList"></ul>
+    <button class="btn small" id="addFolder">Add folder</button>
+
+    <h3>Streamable</h3>
+    <p class="muted" id="streamableNote"></p>
+    <p class="notice" id="loginNotice" hidden></p>
+    <label>Email<input type="email" id="stEmail" autocomplete="off"></label>
+    <label>Password<input type="password" id="stPass" autocomplete="off" placeholder=""></label>
+    <div class="row">
+      <button class="btn primary small" id="saveLogin">Save</button>
+      <button class="btn ghost small" id="forgetLogin">Forget login</button>
+    </div>
+
+    <h3>Exports</h3>
+    <p class="muted" id="exportNote"></p>
+  </dialog>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

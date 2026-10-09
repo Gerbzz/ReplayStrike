@@ -1,0 +1,44 @@
+{
+  "name": "clipdeck",
+  "version": "0.1.0",
+  "description": "Find, watch, trim and share your local game clips.",
+  "main": "src/main.js",
+  "author": "Gerbzz",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "build": {
+    "appId": "gg.clipdeck.app",
+    "productName": "ClipDeck",
+    "files": [
+      "src/**",
+      "renderer/**",
+      "package.json",
+      "!node_modules/ffprobe-static/bin/darwin/**",
+      "!node_modules/ffprobe-static/bin/linux/**",
+      "!node_modules/ffprobe-static/bin/win32/ia32/**"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "allowScripts": {
+    "ffmpeg-static@5.3.0": true
+  }
+}
