@@ -1,5 +1,12 @@
-const api = window.clipdeck;
+const api = window.replaystrike;
 const $ = (id) => document.getElementById(id);
+
+const STYLE_OPTIONS = [['none', 'Original'], ['cinematic', 'Cinematic'], ['vibrant', 'Vibrant'], ['noir', 'Noir']];
+const FORMAT_OPTIONS = [['original', 'Landscape'], ['vertical', 'Vertical crop'], ['vertical-fit', 'Vertical fit'], ['square', 'Square']];
+const SLOW_BEFORE = 0.6; // keep in step with src/ffmpeg.js
+const SLOW_AFTER = 0.9;
+
+const blankFx = () => ({ style: 'none', format: 'original', moment: null, title: '', fades: false, music: null, gameVol: 1 });
 
 const state = {
   clips: [],
@@ -7,15 +14,19 @@ const state = {
   game: null,
   query: '',
   sort: 'new',
+  selected: [], // clip paths, in the order they were picked
   current: null,
   duration: 0,
   trim: [0, 0],
+  fx: blankFx(),
+  reelFx: blankFx(),
   busy: false,
   jobId: null,
+  onProgress: null,
 };
 const cards = new Map(); // clip path -> card element
 
-/* ---------- formatting ---------- */
+/* ---------- helpers ---------- */
 
 function fmtDur(s) {
   s = Math.max(0, Math.round(s));
@@ -31,7 +42,18 @@ function fmtSize(bytes) {
 }
 
 function fmtDate(ms) {
-  return new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function dayGroup(ms) {
+  const d = new Date(ms);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.floor((today - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return 'This week';
+  return d.toLocaleString(undefined, { month: 'long', year: 'numeric' });
 }
 
 function el(tag, className, text) {
@@ -44,11 +66,36 @@ function el(tag, className, text) {
 function toast(message) {
   const t = el('div', 'toast', message);
   $('toasts').append(t);
-  setTimeout(() => t.remove(), 4000);
+  setTimeout(() => t.remove(), 4500);
 }
 
 function errorText(err) {
   return String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+}
+
+const fileUrl = (file) => `clip://file/?p=${encodeURIComponent(file)}`;
+const fxPayload = (fx) => ({ ...fx, music: fx.music ? fx.music.path : null });
+const fxActive = (fx) => fx.style !== 'none' || fx.format !== 'original' || fx.moment != null || Boolean(fx.title.trim()) || fx.fades || Boolean(fx.music) || fx.gameVol !== 1;
+
+// Renders a single-choice row of chips bound to fx[key].
+function chipGroup(containerId, options, fx, key, onChange) {
+  const box = $(containerId);
+  const render = () => {
+    box.replaceChildren(
+      ...options.map(([value, label]) => {
+        const b = el('button', 'chip' + (fx()[key] === value ? ' active' : ''), label);
+        b.dataset.value = value;
+        b.addEventListener('click', () => {
+          fx()[key] = value;
+          render();
+          if (onChange) onChange();
+        });
+        return b;
+      })
+    );
+  };
+  render();
+  return render;
 }
 
 /* ---------- library ---------- */
@@ -81,27 +128,95 @@ function fillCard(card, clip) {
   if (clip.upload) thumb.append(el('span', 'badge shared', 'Shared'));
 }
 
+// Plays a muted preview on the card after a short hover.
+function attachHoverPreview(card, clip) {
+  let timer;
+  let preview;
+  const stop = () => {
+    clearTimeout(timer);
+    if (preview) preview.remove();
+    preview = null;
+  };
+  card.addEventListener('mouseenter', () => {
+    timer = setTimeout(() => {
+      if (!clip.meta || $('player').open) return;
+      preview = el('video');
+      preview.muted = true;
+      preview.loop = true;
+      preview.src = `${fileUrl(clip.path)}#t=${Math.floor(clip.meta.duration * 0.3)}`;
+      preview.addEventListener('error', stop);
+      card.querySelector('.thumb').append(preview);
+      preview.play().catch(() => {});
+    }, 450);
+  });
+  card.addEventListener('mouseleave', stop);
+  card.addEventListener('click', stop);
+}
+
+function toggleSelected(clip) {
+  const i = state.selected.indexOf(clip.path);
+  if (i >= 0) state.selected.splice(i, 1);
+  else state.selected.push(clip.path);
+  renderSelection();
+}
+
+function renderSelection() {
+  state.selected = state.selected.filter((p) => state.clips.some((c) => c.path === p));
+  for (const [file, card] of cards) {
+    const n = state.selected.indexOf(file);
+    card.classList.toggle('selected', n >= 0);
+    card.querySelector('.pick').textContent = n >= 0 ? String(n + 1) : '';
+  }
+  const count = state.selected.length;
+  $('grid').classList.toggle('picking', count > 0);
+  $('selbar').hidden = count === 0;
+  $('selCount').textContent = count === 1 ? '1 clip selected. Pick at least one more.' : `${count} clips selected`;
+  $('makeReel').disabled = count < 2;
+}
+
 function renderGrid() {
   const list = visibleClips();
   const grid = $('grid');
+  const grouped = state.sort === 'new' || state.sort === 'old';
+  const nodes = [];
+  let lastGroup = null;
   cards.clear();
-  grid.replaceChildren(
-    ...list.map((clip) => {
-      const card = el('button', 'card');
-      card.append(el('div', 'thumb'));
-      const body = el('div', 'card-body');
-      body.append(el('div', 'card-title', clip.name), el('div', 'card-sub', `${clip.game} · ${fmtDate(clip.mtime)} · ${fmtSize(clip.size)}`));
-      card.append(body);
-      fillCard(card, clip);
-      card.addEventListener('click', () => openPlayer(clip));
-      cards.set(clip.path, card);
-      return card;
-    })
-  );
+  for (const clip of list) {
+    if (grouped) {
+      const g = dayGroup(clip.mtime);
+      if (g !== lastGroup) nodes.push(el('div', 'group', g));
+      lastGroup = g;
+    }
+    const card = el('div', 'card');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    const pick = el('button', 'pick');
+    pick.setAttribute('aria-label', 'Select for highlight reel');
+    pick.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleSelected(clip);
+    });
+    const body = el('div', 'card-body');
+    body.append(el('div', 'card-title', clip.name), el('div', 'card-sub', `${clip.game} · ${fmtDate(clip.mtime)} · ${fmtSize(clip.size)}`));
+    card.append(pick, el('div', 'thumb'), body);
+    fillCard(card, clip);
+    card.addEventListener('click', (ev) => (ev.ctrlKey || ev.shiftKey ? toggleSelected(clip) : openPlayer(clip)));
+    card.addEventListener('keydown', (ev) => {
+      if (ev.target === card && (ev.key === 'Enter' || ev.key === ' ')) {
+        ev.preventDefault();
+        openPlayer(clip);
+      }
+    });
+    attachHoverPreview(card, clip);
+    cards.set(clip.path, card);
+    nodes.push(card);
+  }
+  grid.replaceChildren(...nodes);
   const none = state.clips.length === 0;
   grid.hidden = none;
   $('empty').hidden = !none;
   $('heading').textContent = `${state.game || 'All clips'} (${list.length})`;
+  renderSelection();
 }
 
 function renderSidebar() {
@@ -122,8 +237,8 @@ function renderSidebar() {
     })
   );
   const found = state.sources.filter((s) => s.exists);
-  $('sourcesSummary').textContent = `Watching ${found.length} folder${found.length === 1 ? '' : 's'}`;
-  $('emptyText').textContent = `Checked ${state.sources.length} known locations (NVIDIA, Xbox Game Bar, AMD, Medal, Outplayed, Videos) and found no video files. Record a clip, or point ClipDeck at the folder your recorder saves to.`;
+  $('sourcesSummary').textContent = `Watching ${found.length} folder${found.length === 1 ? '' : 's'} for new clips`;
+  $('emptyText').textContent = `Checked ${state.sources.length} known locations (NVIDIA, Xbox Game Bar, AMD, Medal, Outplayed, Videos) and found no video files. Record a clip, or point ReplayStrike at the folder your recorder saves to.`;
 }
 
 function renderSources() {
@@ -161,6 +276,44 @@ async function rescan() {
 /* ---------- player ---------- */
 
 const video = $('video');
+const screen = $('screen');
+
+function slowWindow() {
+  const m = state.fx.moment;
+  const [a, b] = state.trim;
+  if (m == null || m < a || m > b) return null;
+  return [Math.max(a, m - SLOW_BEFORE), Math.min(b, m + SLOW_AFTER)];
+}
+
+// Positions the preview overlays over the actual picture inside the letterboxed <video>.
+function layoutFrame() {
+  const sw = screen.clientWidth;
+  const sh = screen.clientHeight;
+  const vw = video.videoWidth || 16;
+  const vh = video.videoHeight || 9;
+  const scale = Math.min(sw / vw, sh / vh);
+  const w = vw * scale;
+  const h = vh * scale;
+  const frame = $('frame');
+  Object.assign(frame.style, { left: `${(sw - w) / 2}px`, top: `${(sh - h) / 2}px`, width: `${w}px`, height: `${h}px` });
+
+  const fx = state.fx;
+  const visible = fx.format === 'vertical' ? Math.min(w, (h * 9) / 16) : fx.format === 'square' ? Math.min(w, h) : w;
+  const mask = Math.max(0, (w - visible) / 2);
+  $('maskL').style.width = $('maskR').style.width = `${mask}px`;
+  $('maskL').style.display = $('maskR').style.display = mask ? '' : 'none';
+
+  const letterbox = fx.style === 'cinematic' && fx.format === 'original';
+  const title = $('titlePreview');
+  title.textContent = fx.title.trim();
+  Object.assign(title.style, {
+    left: `${mask + visible * 0.05}px`,
+    bottom: `${h * (letterbox ? 0.14 : 0.07)}px`,
+    fontSize: `${Math.min(visible, h) / 12}px`,
+  });
+  screen.dataset.style = fx.style;
+  screen.dataset.format = fx.format;
+}
 
 function renderTrim() {
   const d = state.duration || 1;
@@ -171,7 +324,40 @@ function renderTrim() {
   $('trimEnd').style.left = `${(b / d) * 100}%`;
   const whole = a < 0.05 && b > d - 0.05;
   $('trimLabel').textContent = whole ? `Whole clip · ${fmtDur(d)}` : `${fmtDur(a)} to ${fmtDur(b)} · ${fmtDur(b - a)} selected`;
-  $('saveTrim').disabled = state.busy || whole;
+  $('saveEdit').disabled = state.busy || (whole && !fxActive(state.fx));
+
+  const m = state.fx.moment;
+  $('trimMoment').hidden = m == null;
+  if (m != null) $('trimMoment').style.left = `${(m / d) * 100}%`;
+  $('fxMoment').firstChild.textContent = m == null ? 'Slow-mo at playhead ' : `Slow-mo at ${fmtDur(m)} `;
+  $('fxMomentClear').hidden = m == null;
+}
+
+function renderFx() {
+  const fx = state.fx;
+  renderStyleChips();
+  renderFormatChips();
+  $('fxTitle').value = fx.title;
+  $('fxFades').checked = fx.fades;
+  $('fxMusic').textContent = fx.music ? fx.music.name : 'Add your own track';
+  $('fxMusicClear').hidden = !fx.music;
+  $('fxVol').value = Math.round(fx.gameVol * 100);
+  $('fxVolOut').textContent = `${Math.round(fx.gameVol * 100)}%`;
+  video.volume = fx.gameVol;
+  layoutFrame();
+  renderTrim();
+}
+
+let editTimer;
+function persistEdit() {
+  const clip = state.current;
+  if (!clip || !state.duration) return;
+  const [a, b] = state.trim;
+  const whole = a < 0.05 && b > state.duration - 0.05;
+  const edit = { file: clip.path, trim: whole ? null : [a, b], moment: state.fx.moment };
+  clip.edit = edit.trim || edit.moment != null ? { trim: edit.trim, moment: edit.moment } : null;
+  clearTimeout(editTimer);
+  editTimer = setTimeout(() => api.saveEdit(edit), 400);
 }
 
 function setTrim(edge, t) {
@@ -180,12 +366,14 @@ function setTrim(edge, t) {
   if (edge === 0) state.trim[0] = Math.max(0, Math.min(t, state.trim[1] - gap));
   else state.trim[1] = Math.min(d, Math.max(t, state.trim[0] + gap));
   renderTrim();
+  persistEdit();
 }
 
 function setDuration(d) {
   if (!d || !isFinite(d) || Math.abs(d - state.duration) < 0.01) return;
   state.duration = d;
-  state.trim = [0, d];
+  const saved = state.current && state.current.edit && state.current.edit.trim;
+  state.trim = saved && saved[1] <= d + 0.1 ? [saved[0], Math.min(saved[1], d)] : [0, d];
   renderTrim();
 }
 
@@ -204,7 +392,7 @@ function setStatus(kind, text, pct) {
 
 function setBusy(busy) {
   state.busy = busy;
-  for (const id of ['upStreamable', 'discord', 'upYouTube', 'saveTrim', 'copyFile', 'trash', 'discordSize']) $(id).disabled = busy;
+  for (const id of ['upStreamable', 'discord', 'upYouTube', 'copyFile', 'trash', 'discordSize']) $(id).disabled = busy;
   renderTrim();
 }
 
@@ -212,6 +400,8 @@ function openPlayer(clip) {
   state.current = clip;
   state.duration = 0;
   state.trim = [0, 0];
+  state.fx = blankFx();
+  if (clip.edit && clip.edit.moment != null) state.fx.moment = clip.edit.moment;
   $('clipTitle').textContent = clip.name;
   const m = clip.meta;
   $('clipMeta').textContent = [clip.game, fmtDate(clip.mtime), m && `${m.width}×${m.height}${m.fps ? ` ${m.fps}fps` : ''}`, fmtSize(clip.size)].filter(Boolean).join(' · ');
@@ -220,8 +410,9 @@ function openPlayer(clip) {
   setStatus(null);
   setBusy(false);
   if (m) setDuration(m.duration);
-  video.src = `clip://file/?p=${encodeURIComponent(clip.path)}`;
+  video.src = fileUrl(clip.path);
   $('player').showModal();
+  renderFx();
   video.play().catch(() => {});
 }
 
@@ -233,20 +424,30 @@ function closePlayer() {
   if ($('player').open) $('player').close();
 }
 
-video.addEventListener('loadedmetadata', () => setDuration(video.duration));
+video.addEventListener('loadedmetadata', () => {
+  setDuration(video.duration);
+  layoutFrame();
+  if (state.trim[0] > 0.05) video.currentTime = state.trim[0];
+});
 video.addEventListener('timeupdate', () => {
   const d = state.duration || 1;
-  $('trimHead').style.left = `${(video.currentTime / d) * 100}%`;
+  const t = video.currentTime;
+  $('trimHead').style.left = `${(t / d) * 100}%`;
   const [a, b] = state.trim;
   // loop the selection while previewing a trim
-  if (b < d - 0.05 && video.currentTime >= b && !video.paused) video.currentTime = a;
+  if (b < d - 0.05 && t >= b && !video.paused) video.currentTime = a;
+  const slow = slowWindow();
+  const inSlow = Boolean(slow && t >= slow[0] && t < slow[1]);
+  video.playbackRate = inSlow ? 0.5 : 1;
+  $('slowBadge').hidden = !inSlow;
 });
 video.addEventListener('error', () => {
   if (!state.current) return;
   const codec = state.current.meta && state.current.meta.codec;
-  $('videoNote').textContent = `This clip${codec ? ` (${codec})` : ''} can't be previewed here, but trimming and sharing still work.`;
+  $('videoNote').textContent = `This clip${codec ? ` (${codec})` : ''} can't be previewed here, but editing and sharing still work.`;
   $('videoNote').hidden = false;
 });
+new ResizeObserver(layoutFrame).observe(screen);
 
 // Trim bar: drag a handle to move it, click the track to seek.
 const trimBar = $('trim');
@@ -259,8 +460,7 @@ trimBar.addEventListener('pointerdown', (ev) => {
   if (!state.duration) return;
   trimBar.setPointerCapture(ev.pointerId);
   dragEdge = ev.target.dataset.edge != null ? Number(ev.target.dataset.edge) : null;
-  const t = timeAt(ev);
-  if (dragEdge == null) video.currentTime = t;
+  if (dragEdge == null) video.currentTime = timeAt(ev);
 });
 trimBar.addEventListener('pointermove', (ev) => {
   if (!trimBar.hasPointerCapture(ev.pointerId)) return;
@@ -273,23 +473,74 @@ trimBar.addEventListener('pointermove', (ev) => {
 });
 trimBar.addEventListener('pointerup', () => (dragEdge = null));
 
+function setMoment(t) {
+  state.fx.moment = t;
+  renderTrim();
+  persistEdit();
+}
+
 $('setStart').addEventListener('click', () => setTrim(0, video.currentTime));
 $('setEnd').addEventListener('click', () => setTrim(1, video.currentTime));
 $('trimReset').addEventListener('click', () => {
   state.trim = [0, state.duration];
   renderTrim();
+  persistEdit();
 });
 
 $('player').addEventListener('keydown', (ev) => {
   if (ev.target.matches('select, input')) return;
-  if (ev.key === 'i' || ev.key === 'I') setTrim(0, video.currentTime);
-  else if (ev.key === 'o' || ev.key === 'O') setTrim(1, video.currentTime);
+  const k = ev.key.toLowerCase();
+  if (k === 'i') setTrim(0, video.currentTime);
+  else if (k === 'o') setTrim(1, video.currentTime);
+  else if (k === 'm') setMoment(video.currentTime);
   else if (ev.key === 'ArrowLeft' && ev.target !== video) video.currentTime -= 5;
   else if (ev.key === 'ArrowRight' && ev.target !== video) video.currentTime += 5;
 });
 $('player').addEventListener('close', closePlayer);
 $('player').addEventListener('cancel', (ev) => state.busy && ev.preventDefault());
 $('closePlayer').addEventListener('click', () => !state.busy && closePlayer());
+
+/* ---------- effects controls ---------- */
+
+const onFxChange = () => {
+  layoutFrame();
+  renderTrim();
+};
+const renderStyleChips = chipGroup('styleChips', STYLE_OPTIONS, () => state.fx, 'style', onFxChange);
+const renderFormatChips = chipGroup('formatChips', FORMAT_OPTIONS, () => state.fx, 'format', onFxChange);
+
+$('fxMoment').addEventListener('click', () => setMoment(video.currentTime));
+$('fxMomentClear').addEventListener('click', () => setMoment(null));
+$('fxTitle').addEventListener('input', (ev) => {
+  state.fx.title = ev.target.value;
+  onFxChange();
+});
+$('fxFades').addEventListener('change', (ev) => {
+  state.fx.fades = ev.target.checked;
+  onFxChange();
+});
+$('fxVol').addEventListener('input', (ev) => {
+  state.fx.gameVol = Number(ev.target.value) / 100;
+  $('fxVolOut').textContent = `${ev.target.value}%`;
+  video.volume = state.fx.gameVol;
+  renderTrim();
+});
+$('fxMusic').addEventListener('click', async () => {
+  const track = await api.pickMusic();
+  if (!track) return;
+  state.fx.music = track;
+  if (state.fx.gameVol === 1) state.fx.gameVol = 0.5; // let the track be heard
+  renderFx();
+});
+$('fxMusicClear').addEventListener('click', () => {
+  state.fx.music = null;
+  renderFx();
+});
+$('fxReset').addEventListener('click', () => {
+  state.fx = blankFx();
+  renderFx();
+  persistEdit();
+});
 
 /* ---------- share actions ---------- */
 
@@ -298,11 +549,12 @@ async function runJob(startText, fn, doneText) {
   const clip = state.current;
   const jobId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   state.jobId = jobId;
+  state.onProgress = (stage, pct) => setStatus('run', `${stage}… ${Math.round(pct * 100)}%`, pct);
   setBusy(true);
   setStatus('run', startText, 0);
   try {
     const [start, end] = state.trim;
-    const result = await fn({ jobId, file: clip.path, start, end }, clip);
+    const result = await fn({ jobId, file: clip.path, start, end, fx: fxPayload(state.fx) }, clip);
     const text = doneText(result);
     setStatus('done', text);
     toast(text);
@@ -321,7 +573,7 @@ async function runJob(startText, fn, doneText) {
 }
 
 api.onJobProgress(({ jobId, stage, pct }) => {
-  if (jobId === state.jobId) setStatus('run', `${stage}… ${Math.round(pct * 100)}%`, pct);
+  if (jobId === state.jobId && state.onProgress) state.onProgress(stage, pct);
 });
 
 $('upStreamable').addEventListener('click', () =>
@@ -342,7 +594,7 @@ $('upStreamable').addEventListener('click', () =>
 $('discord').addEventListener('click', () => {
   const targetMB = Number($('discordSize').value);
   runJob(
-    'Compressing…',
+    'Rendering…',
     (job) => api.exportClip({ ...job, targetMB }),
     (out) => `${fmtSize(out.size)} file copied. Press Ctrl+V in Discord to attach it.`
   );
@@ -352,18 +604,18 @@ $('upYouTube').addEventListener('click', () =>
   runJob('Preparing…', api.uploadYouTube, () => 'YouTube upload opened in your browser. Drag the highlighted file from the folder window onto the page.')
 );
 
-$('saveTrim').addEventListener('click', () =>
+$('saveEdit').addEventListener('click', () =>
   runJob(
-    'Trimming…',
+    'Rendering…',
     (job) => api.exportClip({ ...job, targetMB: 0 }),
-    (out) => `Saved ${fmtSize(out.size)} trimmed copy to ClipDeck Exports and copied the file.`
+    (out) => `Saved a ${fmtSize(out.size)} copy to Videos\\ReplayStrike and copied the file.`
   )
 );
 
 $('copyFile').addEventListener('click', async () => {
   try {
     await api.copyFile(state.current.path);
-    toast('File copied. Paste it anywhere.');
+    toast('Original file copied. Paste it anywhere.');
   } catch (err) {
     setStatus('error', errorText(err));
   }
@@ -393,6 +645,95 @@ $('linkUrl').addEventListener('click', (ev) => {
   api.openLink($('linkUrl').textContent);
 });
 
+/* ---------- highlight reel ---------- */
+
+const renderReelStyle = chipGroup('reelStyleChips', STYLE_OPTIONS, () => state.reelFx, 'style');
+const renderReelFormat = chipGroup('reelFormatChips', FORMAT_OPTIONS, () => state.reelFx, 'format');
+
+function setReelStatus(kind, text, pct) {
+  const s = $('reelStatus');
+  s.hidden = !kind;
+  s.className = 'status' + (kind && kind !== 'run' ? ' ' + kind : '');
+  $('reelStatusText').textContent = text || '';
+  if (pct != null) $('reelBarFill').style.width = `${Math.round(pct * 100)}%`;
+}
+
+function renderReelMusic() {
+  const fx = state.reelFx;
+  $('reelMusic').textContent = fx.music ? fx.music.name : 'Add your own track';
+  $('reelMusicClear').hidden = !fx.music;
+  $('reelVol').value = Math.round(fx.gameVol * 100);
+  $('reelVolOut').textContent = `${Math.round(fx.gameVol * 100)}%`;
+}
+
+$('makeReel').addEventListener('click', async () => {
+  const s = await api.getSettings();
+  const picked = state.selected.map((p) => state.clips.find((c) => c.path === p)).filter(Boolean);
+  $('reelNote').textContent = `Clips play in the order you picked them. Each one uses the trim and slow-mo you set on it; untrimmed clips use their last ${s.reelSeconds} seconds.`;
+  $('reelList').replaceChildren(
+    ...picked.map((c) => {
+      const trim = c.edit && c.edit.trim;
+      const len = trim ? trim[1] - trim[0] : Math.min(s.reelSeconds, (c.meta && c.meta.duration) || s.reelSeconds);
+      return el('li', null, `${c.name} · ${fmtDur(len)}${trim ? ' (your trim)' : ''}`);
+    })
+  );
+  renderReelStyle();
+  renderReelFormat();
+  $('reelTitle').value = state.reelFx.title;
+  renderReelMusic();
+  setReelStatus(null);
+  $('reelGo').disabled = false;
+  $('reel').showModal();
+});
+
+$('reelTitle').addEventListener('input', (ev) => (state.reelFx.title = ev.target.value));
+$('reelVol').addEventListener('input', (ev) => {
+  state.reelFx.gameVol = Number(ev.target.value) / 100;
+  $('reelVolOut').textContent = `${ev.target.value}%`;
+});
+$('reelMusic').addEventListener('click', async () => {
+  const track = await api.pickMusic();
+  if (!track) return;
+  state.reelFx.music = track;
+  if (state.reelFx.gameVol === 1) state.reelFx.gameVol = 0.5;
+  renderReelMusic();
+});
+$('reelMusicClear').addEventListener('click', () => {
+  state.reelFx.music = null;
+  renderReelMusic();
+});
+$('closeReel').addEventListener('click', () => !state.busy && $('reel').close());
+$('reel').addEventListener('cancel', (ev) => state.busy && ev.preventDefault());
+$('clearSel').addEventListener('click', () => {
+  state.selected = [];
+  renderSelection();
+});
+
+$('reelGo').addEventListener('click', async () => {
+  if (state.busy) return;
+  const jobId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  state.jobId = jobId;
+  state.busy = true;
+  state.onProgress = (stage, pct) => setReelStatus('run', `${stage}… ${Math.round(pct * 100)}%`, pct);
+  $('reelGo').disabled = true;
+  setReelStatus('run', 'Building reel…', 0);
+  try {
+    const out = await api.makeReel({ jobId, files: state.selected, fx: fxPayload(state.reelFx) });
+    state.selected = [];
+    $('reel').close();
+    await rescan();
+    toast(`Highlight reel ready: ${fmtDur(out.duration)}, ${fmtSize(out.size)}.`);
+    const made = state.clips.find((c) => c.path === out.path);
+    if (made) openPlayer(made);
+  } catch (err) {
+    setReelStatus('error', errorText(err));
+    $('reelGo').disabled = false;
+  } finally {
+    state.jobId = null;
+    state.busy = false;
+  }
+});
+
 /* ---------- settings ---------- */
 
 async function openSettings(notice) {
@@ -404,7 +745,7 @@ async function openSettings(notice) {
     `Free accounts: up to ${s.limitMB} MB and ${s.limitSeconds / 60} minutes per video, and Streamable deletes free videos after about 90 days. ` +
     `Longer or larger selections are compressed to fit before upload. ` +
     (s.canSavePassword ? 'Your password is stored encrypted by Windows on this PC only.' : 'This PC cannot encrypt saved passwords, so it is kept only until you close the app.');
-  $('exportNote').textContent = `Trimmed and compressed copies are saved to ${s.exportDir}`;
+  $('exportNote').textContent = `Edited clips and highlight reels are saved to ${s.exportDir}`;
   $('loginNotice').hidden = !notice;
   $('loginNotice').textContent = notice || '';
   renderSources();

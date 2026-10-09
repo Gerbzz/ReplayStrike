@@ -3,12 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' clip: data:; media-src clip:; style-src 'self'; script-src 'self'">
-  <title>ClipDeck</title>
+  <title>ReplayStrike</title>
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark"></span>ClipDeck</div>
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5 19 12 7 19.5Z"/></svg>
+      <span>Replay<b>Strike</b></span>
+    </div>
+    <div class="side-label">Library</div>
     <nav class="games" id="games"></nav>
     <div class="sidebar-foot">
       <div class="sources-summary" id="sourcesSummary"></div>
@@ -34,21 +38,38 @@
       <p id="emptyText"></p>
       <button class="btn primary" id="emptyAdd">Add a clips folder</button>
     </section>
+    <div class="selbar" id="selbar" hidden>
+      <span id="selCount"></span>
+      <button class="btn primary" id="makeReel">Create highlight reel</button>
+      <button class="btn ghost" id="clearSel">Clear</button>
+    </div>
   </main>
 
   <dialog class="player" id="player">
     <div class="player-stage">
-      <video id="video" controls preload="metadata"></video>
+      <div class="screen" id="screen">
+        <video id="video" controls preload="metadata"></video>
+        <div class="frame" id="frame">
+          <div class="vig"></div>
+          <div class="bar-top"></div>
+          <div class="bar-bottom"></div>
+          <div class="mask mask-l" id="maskL"></div>
+          <div class="mask mask-r" id="maskR"></div>
+          <div class="title-preview" id="titlePreview"></div>
+          <div class="slow-badge" id="slowBadge" hidden>SLOW-MO</div>
+        </div>
+      </div>
       <div class="video-note" id="videoNote" hidden></div>
       <div class="trim" id="trim">
         <div class="trim-range" id="trimRange"></div>
+        <div class="trim-moment" id="trimMoment" hidden></div>
         <div class="trim-head" id="trimHead"></div>
         <div class="trim-handle" id="trimStart" data-edge="0"></div>
         <div class="trim-handle" id="trimEnd" data-edge="1"></div>
       </div>
       <div class="trim-row">
-        <button class="btn ghost small" id="setStart" title="I">Set start</button>
-        <button class="btn ghost small" id="setEnd" title="O">Set end</button>
+        <button class="btn ghost small" id="setStart">Set start <kbd>I</kbd></button>
+        <button class="btn ghost small" id="setEnd">Set end <kbd>O</kbd></button>
         <span class="trim-label" id="trimLabel"></span>
         <button class="btn ghost small" id="trimReset">Whole clip</button>
       </div>
@@ -56,9 +77,43 @@
 
     <div class="player-side">
       <button class="close" id="closePlayer" aria-label="Close">&times;</button>
+      <div class="side-scroll">
       <h2 id="clipTitle"></h2>
       <p class="muted" id="clipMeta"></p>
 
+      <h3>Make it pop</h3>
+      <div class="field-label">Look</div>
+      <div class="chips" id="styleChips"></div>
+      <div class="field-label">Shape</div>
+      <div class="chips" id="formatChips"></div>
+      <div class="field-label">Slow-mo</div>
+      <div class="inline">
+        <button class="btn small grow" id="fxMoment">Slow-mo at playhead <kbd>M</kbd></button>
+        <button class="btn ghost small" id="fxMomentClear" hidden>Remove</button>
+      </div>
+      <div class="field-label">Title</div>
+      <input type="text" id="fxTitle" maxlength="60" placeholder="Shown for the first 3 seconds">
+      <div class="field-label">Music</div>
+      <div class="inline">
+        <button class="btn small grow ellipsis" id="fxMusic">Add your own track</button>
+        <button class="btn ghost small" id="fxMusicClear" hidden>Remove</button>
+      </div>
+      <label class="range">Game audio <output id="fxVolOut">100%</output>
+        <input type="range" id="fxVol" min="0" max="100" value="100">
+      </label>
+      <label class="check"><input type="checkbox" id="fxFades"> Fade in and out</label>
+      <button class="btn ghost small" id="fxReset">Reset effects</button>
+
+      <h3>File</h3>
+      <div class="file-actions">
+        <button class="btn small" id="saveEdit">Save edited copy</button>
+        <button class="btn small" id="copyFile">Copy original</button>
+        <button class="btn small" id="reveal">Show in folder</button>
+        <button class="btn small danger" id="trash">Delete</button>
+      </div>
+      </div>
+
+      <div class="side-dock">
       <h3>Share</h3>
       <button class="btn primary block" id="upStreamable">Upload to Streamable &amp; copy link</button>
       <div class="split">
@@ -76,35 +131,56 @@
         <button class="btn small" id="linkCopy">Copy</button>
       </div>
 
-      <h3>File</h3>
-      <div class="file-actions">
-        <button class="btn small" id="saveTrim">Save trimmed copy</button>
-        <button class="btn small" id="copyFile">Copy file</button>
-        <button class="btn small" id="reveal">Show in folder</button>
-        <button class="btn small danger" id="trash">Delete</button>
-      </div>
-
       <div class="status" id="status" hidden>
         <div class="bar"><div class="bar-fill" id="barFill"></div></div>
         <p id="statusText"></p>
       </div>
+      </div>
     </div>
   </dialog>
 
-  <dialog class="settings" id="settings">
+  <dialog class="sheet" id="reel">
+    <button class="close" id="closeReel" aria-label="Close">&times;</button>
+    <h2>Highlight reel</h2>
+    <p class="muted" id="reelNote"></p>
+    <ol class="reel-list" id="reelList"></ol>
+    <div class="field-label">Look</div>
+    <div class="chips" id="reelStyleChips"></div>
+    <div class="field-label">Shape</div>
+    <div class="chips" id="reelFormatChips"></div>
+    <div class="field-label">Title</div>
+    <input type="text" id="reelTitle" maxlength="60" placeholder="Shown at the start">
+    <div class="field-label">Music</div>
+    <div class="inline">
+      <button class="btn small grow ellipsis" id="reelMusic">Add your own track</button>
+      <button class="btn ghost small" id="reelMusicClear" hidden>Remove</button>
+    </div>
+    <label class="range">Game audio <output id="reelVolOut">100%</output>
+      <input type="range" id="reelVol" min="0" max="100" value="100">
+    </label>
+    <div class="row">
+      <button class="btn primary" id="reelGo">Build reel</button>
+    </div>
+    <div class="status" id="reelStatus" hidden>
+      <div class="bar"><div class="bar-fill" id="reelBarFill"></div></div>
+      <p id="reelStatusText"></p>
+    </div>
+  </dialog>
+
+  <dialog class="sheet" id="settings">
     <button class="close" id="closeSettings" aria-label="Close">&times;</button>
     <h2>Folders &amp; accounts</h2>
 
     <h3>Clip folders</h3>
-    <p class="muted">Checked automatically every time ClipDeck starts.</p>
+    <p class="muted">Checked automatically every time ReplayStrike starts.</p>
     <ul class="source-list" id="sourceList"></ul>
     <button class="btn small" id="addFolder">Add folder</button>
 
     <h3>Streamable</h3>
     <p class="muted" id="streamableNote"></p>
     <p class="notice" id="loginNotice" hidden></p>
-    <label>Email<input type="email" id="stEmail" autocomplete="off"></label>
-    <label>Password<input type="password" id="stPass" autocomplete="off" placeholder=""></label>
+    <label class="stack">Email<input type="email" id="stEmail" autocomplete="off"></label>
+    <label class="stack">Password<input type="password" id="stPass" autocomplete="off" placeholder=""></label>
     <div class="row">
       <button class="btn primary small" id="saveLogin">Save</button>
       <button class="btn ghost small" id="forgetLogin">Forget login</button>

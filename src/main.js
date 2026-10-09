@@ -6,7 +6,7 @@ const { execFile } = require('child_process');
 const { Store } = require('./store');
 const { detectSources } = require('./detect');
 const { Library } = require('./library');
-const { exportClip } = require('./ffmpeg');
+const { exportClip, makeReel, hasFx } = require('./ffmpeg');
 const streamable = require('./streamable');
 
 protocol.registerSchemesAsPrivileged([
@@ -19,8 +19,10 @@ let library;
 let watchers = [];
 let sessionPassword = null; // used when the OS can't encrypt the saved one
 const servable = new Set(); // exported files the player may also read
+const pickedMusic = new Set(); // audio files the user chose through the picker
 
 const MIME = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.jpg': 'image/jpeg' };
+const REEL_DEFAULT_SECONDS = 15; // untrimmed clips contribute their final seconds, where the action usually is
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -72,7 +74,11 @@ function registerProtocol(thumbDir) {
 }
 
 function exportDir() {
-  return path.join(app.getPath('videos'), 'ClipDeck Exports');
+  return path.join(app.getPath('videos'), 'ReplayStrike');
+}
+
+function tempDir() {
+  return path.join(app.getPath('temp'), 'ReplayStrike');
 }
 
 function watch(sources) {
@@ -98,9 +104,13 @@ async function scan() {
   const clips = await library.scan(sources);
   watch(sources);
   const uploads = config.get('uploads');
+  const edits = config.get('edits');
   return {
     sources,
-    clips: clips.map((c) => ({ ...c, upload: uploads[c.path.toLowerCase()] || null })),
+    clips: clips.map((c) => {
+      const id = c.path.toLowerCase();
+      return { ...c, upload: uploads[id] || null, edit: edits[id] || null };
+    }),
   };
 }
 
@@ -121,8 +131,8 @@ function copyFileToClipboard(file) {
   return new Promise((resolve, reject) => {
     execFile(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', 'Set-Clipboard -LiteralPath $env:CLIPDECK_FILE'],
-      { windowsHide: true, env: { ...process.env, CLIPDECK_FILE: file } },
+      ['-NoProfile', '-NonInteractive', '-Command', 'Set-Clipboard -LiteralPath $env:REPLAYSTRIKE_FILE'],
+      { windowsHide: true, env: { ...process.env, REPLAYSTRIKE_FILE: file } },
       (err) => (err ? reject(new Error('Could not copy the file to the clipboard.')) : resolve())
     );
   });
@@ -133,6 +143,16 @@ function clipFor(file) {
   if (!clip) throw new Error('That clip is no longer in the library. Rescan and try again.');
   if (!clip.meta) throw new Error('Still reading this clip. Try again in a moment.');
   return clip;
+}
+
+// Effects arrive from the renderer; music must be a file the user picked.
+function cleanFx(fx) {
+  if (!fx) return null;
+  return { ...fx, uniform: false, music: pickedMusic.has(fx.music) ? fx.music : null };
+}
+
+function isWhole(clip, start, end) {
+  return start < 0.05 && end > clip.meta.duration - 0.05;
 }
 
 function registerIpc() {
@@ -153,6 +173,17 @@ function registerIpc() {
     return true;
   });
 
+  ipcMain.handle('music:pick', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Choose a music track',
+      properties: ['openFile'],
+      filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    pickedMusic.add(r.filePaths[0]);
+    return { path: r.filePaths[0], name: path.basename(r.filePaths[0]) };
+  });
+
   ipcMain.handle('settings:get', () => ({
     email: config.get('streamableEmail') || '',
     hasPassword: Boolean(getPassword()),
@@ -160,6 +191,7 @@ function registerIpc() {
     exportDir: exportDir(),
     limitMB: streamable.LIMIT_MB,
     limitSeconds: streamable.LIMIT_SECONDS,
+    reelSeconds: REEL_DEFAULT_SECONDS,
   }));
 
   ipcMain.handle('settings:set', (_e, { email, password }) => {
@@ -182,6 +214,16 @@ function registerIpc() {
     return true;
   });
 
+  // Remembers each clip's trim and slow-mo moment between sessions.
+  ipcMain.handle('edit:save', (_e, { file, trim, moment }) => {
+    const edits = { ...config.get('edits') };
+    const id = String(file).toLowerCase();
+    if (trim || moment != null) edits[id] = { trim: trim || null, moment: moment == null ? null : moment };
+    else delete edits[id];
+    config.set('edits', edits);
+    return true;
+  });
+
   ipcMain.handle('clip:reveal', (_e, file) => shell.showItemInFolder(file));
   ipcMain.handle('clip:copyFile', (_e, file) => copyFileToClipboard(clipFor(file).path));
   ipcMain.handle('clip:trash', async (_e, file) => {
@@ -194,38 +236,39 @@ function registerIpc() {
     return false;
   });
 
-  // Trim and/or compress into the exports folder, then copy the file to the
-  // clipboard ready to paste.
-  ipcMain.handle('export:run', async (_e, { jobId, file, start, end, targetMB }) => {
+  // Renders the selection (trim + effects, optionally to a size limit) into
+  // the exports folder and copies the file to the clipboard ready to paste.
+  ipcMain.handle('export:run', async (_e, { jobId, file, start, end, targetMB, fx }) => {
     const clip = clipFor(file);
-    const progress = (pct) => send('job:progress', { jobId, stage: targetMB ? 'Compressing' : 'Trimming', pct });
+    const clean = cleanFx(fx);
+    const stage = targetMB || hasFx(clean) ? 'Rendering' : 'Trimming';
     const out = await exportClip(
-      { src: clip.path, start, end, targetMB, outDir: exportDir(), label: targetMB ? `${targetMB}MB` : 'trim', meta: clip.meta, srcSize: clip.size },
-      progress
+      { src: clip.path, start, end, targetMB, outDir: exportDir(), label: targetMB ? `${targetMB}MB` : 'edit', meta: clip.meta, srcSize: clip.size, fx: clean },
+      (pct) => send('job:progress', { jobId, stage, pct })
     );
     servable.add(out.path);
     await copyFileToClipboard(out.path).catch(() => {});
     return out;
   });
 
-  ipcMain.handle('upload:streamable', async (_e, { jobId, file, start, end }) => {
+  ipcMain.handle('upload:streamable', async (_e, { jobId, file, start, end, fx }) => {
     const clip = clipFor(file);
+    const clean = cleanFx(fx);
     const email = config.get('streamableEmail');
     const password = getPassword();
     if (!email || !password) throw new Error('NEEDS_LOGIN');
-    const dur = end - start;
-    if (dur > streamable.LIMIT_SECONDS) {
+    if (end - start > streamable.LIMIT_SECONDS) {
       throw new Error(`Streamable's free plan allows ${streamable.LIMIT_SECONDS / 60} minutes per video. Trim the clip first.`);
     }
 
-    const whole = start < 0.05 && end > clip.meta.duration - 0.05;
-    const fitsAsIs = whole && clip.size <= streamable.LIMIT_MB * 1048576 && clip.meta.audioTracks <= 1 && /\.mp4$/i.test(clip.path);
+    const fitsAsIs =
+      isWhole(clip, start, end) && !hasFx(clean) && clip.size <= streamable.LIMIT_MB * 1048576 && clip.meta.audioTracks <= 1 && /\.mp4$/i.test(clip.path);
     let upFile = clip.path;
     let temp = null;
     if (!fitsAsIs) {
       const out = await exportClip(
-        { src: clip.path, start, end, targetMB: streamable.LIMIT_MB, outDir: path.join(app.getPath('temp'), 'ClipDeck'), label: 'upload', meta: clip.meta, srcSize: clip.size },
-        (pct) => send('job:progress', { jobId, stage: 'Preparing', pct })
+        { src: clip.path, start, end, targetMB: streamable.LIMIT_MB, outDir: tempDir(), label: 'upload', meta: clip.meta, srcSize: clip.size, fx: clean },
+        (pct) => send('job:progress', { jobId, stage: 'Rendering', pct })
       );
       upFile = temp = out.path;
     }
@@ -244,14 +287,14 @@ function registerIpc() {
 
   // YouTube forces API uploads from unaudited apps to private, so we hand
   // off instead: prepare the file, put it on the clipboard, open the uploader.
-  ipcMain.handle('upload:youtube', async (_e, { jobId, file, start, end }) => {
+  ipcMain.handle('upload:youtube', async (_e, { jobId, file, start, end, fx }) => {
     const clip = clipFor(file);
-    const whole = start < 0.05 && end > clip.meta.duration - 0.05;
+    const clean = cleanFx(fx);
     let target = clip.path;
-    if (!whole || clip.meta.audioTracks > 1) {
+    if (!isWhole(clip, start, end) || hasFx(clean) || clip.meta.audioTracks > 1) {
       const out = await exportClip(
-        { src: clip.path, start, end, targetMB: 0, outDir: exportDir(), label: 'youtube', meta: clip.meta, srcSize: clip.size },
-        (pct) => send('job:progress', { jobId, stage: 'Preparing', pct })
+        { src: clip.path, start, end, targetMB: 0, outDir: exportDir(), label: 'youtube', meta: clip.meta, srcSize: clip.size, fx: clean },
+        (pct) => send('job:progress', { jobId, stage: 'Rendering', pct })
       );
       servable.add(out.path);
       target = out.path;
@@ -261,36 +304,75 @@ function registerIpc() {
     await shell.openExternal('https://www.youtube.com/upload');
     return { path: target };
   });
+
+  // Joins several clips into one highlight reel. Each clip contributes its
+  // saved trim, or its last few seconds if it has never been trimmed.
+  ipcMain.handle('reel:run', async (_e, { jobId, files, fx }) => {
+    if (!Array.isArray(files) || files.length < 2) throw new Error('Pick at least two clips for a reel.');
+    const edits = config.get('edits');
+    const segments = files.map((file) => {
+      const clip = clipFor(file);
+      const edit = edits[clip.path.toLowerCase()] || {};
+      const d = clip.meta.duration;
+      const [start, end] = edit.trim || [Math.max(0, d - REEL_DEFAULT_SECONDS), d];
+      return { src: clip.path, start, end, meta: clip.meta, srcSize: clip.size, moment: edit.moment == null ? null : edit.moment };
+    });
+    const out = await makeReel(
+      { segments, fx: cleanFx(fx), outDir: exportDir(), tmpDir: path.join(tempDir(), `reel-${Date.now()}`) },
+      (pct) => send('job:progress', { jobId, stage: 'Building reel', pct })
+    );
+    servable.add(out.path);
+    return out;
+  });
 }
 
 function createWindow() {
+  const icon = path.join(__dirname, '..', 'build', 'icon.png');
   win = new BrowserWindow({
-    width: 1360,
-    height: 860,
-    minWidth: 900,
-    minHeight: 600,
-    backgroundColor: '#0c0d11',
-    autoHideMenuBar: true,
-    title: 'ClipDeck',
+    width: 1400,
+    height: 880,
+    minWidth: 980,
+    minHeight: 640,
+    backgroundColor: '#0b0c10',
+    title: 'ReplayStrike',
+    icon: fs.existsSync(icon) ? icon : undefined,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#0b0c10', symbolColor: '#e9ebf1', height: 44 },
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
+  win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 
-  // CLIPDECK_SMOKE=<dir> captures screenshots of the library and player, then quits.
-  const smoke = process.env.CLIPDECK_SMOKE;
+  // REPLAYSTRIKE_SMOKE=<dir> captures screenshots of the main screens, then quits.
+  const smoke = process.env.REPLAYSTRIKE_SMOKE;
   if (smoke) {
     win.webContents.once('did-finish-load', async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const js = (code) => win.webContents.executeJavaScript(code);
       const shot = async (name) => fs.writeFileSync(path.join(smoke, name), (await win.webContents.capturePage()).toPNG());
-      await wait(Number(process.env.CLIPDECK_SMOKE_WAIT) || 9000);
+      await wait(Number(process.env.REPLAYSTRIKE_SMOKE_WAIT) || 9000);
       await shot('library.png');
-      await win.webContents.executeJavaScript("document.querySelector('.card') && document.querySelector('.card').click()");
+      await js("document.querySelectorAll('.pick').forEach((p, i) => i < 3 && p.click())");
+      await wait(400);
+      await shot('selection.png');
+      await js("document.getElementById('makeReel').click()");
+      await wait(500);
+      await shot('reel.png');
+      await js("document.getElementById('reel').close(); document.getElementById('clearSel').click(); document.querySelector('.card').click()");
       await wait(3000);
       await shot('player.png');
-      const state = await win.webContents.executeJavaScript(
-        "JSON.stringify({cards: document.querySelectorAll('.card').length, thumbs: document.querySelectorAll('.card img').length, video: (()=>{const v=document.querySelector('video');return v?{ready:v.readyState,dur:v.duration,err:v.error&&v.error.message}:null})()})"
+      await js(
+        "document.querySelector('#styleChips [data-value=cinematic]').click(); document.getElementById('fxTitle').value='Clutch round'; document.getElementById('fxTitle').dispatchEvent(new Event('input')); document.getElementById('video').currentTime = 1; document.getElementById('fxMoment').click()"
+      );
+      await wait(1200);
+      await shot('player-cinematic.png');
+      await js("document.querySelector('#formatChips [data-value=vertical]').click()");
+      await wait(600);
+      await shot('player-vertical.png');
+      const state = await js(
+        "JSON.stringify({cards: document.querySelectorAll('.card').length, thumbs: document.querySelectorAll('.card img').length, video: (()=>{const v=document.querySelector('#video');return v?{ready:v.readyState,dur:v.duration,err:v.error&&v.error.message}:null})()})"
       );
       console.log('SMOKE ' + state);
       app.quit();
@@ -300,7 +382,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const userData = app.getPath('userData');
-  config = new Store(userData, 'config.json', { folders: [], uploads: {}, streamableEmail: '', streamablePass: '' });
+  config = new Store(userData, 'config.json', { folders: [], uploads: {}, edits: {}, streamableEmail: '', streamablePass: '' });
   const metaStore = new Store(userData, 'meta.json', {});
   const thumbDir = path.join(userData, 'thumbs');
   library = new Library({ thumbDir, metaStore, onUpdate: (u) => send('clip:update', u) });

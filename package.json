@@ -1,12 +1,14 @@
 {
-  "name": "clipdeck",
-  "version": "0.1.0",
-  "description": "Find, watch, trim and share your local game clips.",
+  "name": "replaystrike",
+  "productName": "ReplayStrike",
+  "version": "0.2.0",
+  "description": "Find your game clips, make them look great, and share them in seconds.",
   "main": "src/main.js",
   "author": "Gerbzz",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "icon": "electron scripts/make-icon.js",
     "dist": "electron-builder --win portable"
   },
   "dependencies": {
@@ -14,11 +16,12 @@
     "ffprobe-static": "^3.1.0"
   },
   "build": {
-    "appId": "gg.clipdeck.app",
-    "productName": "ClipDeck",
+    "appId": "gg.replaystrike.app",
+    "productName": "ReplayStrike",
     "files": [
       "src/**",
       "renderer/**",
+      "build/icon.png",
       "package.json",
       "!node_modules/ffprobe-static/bin/darwin/**",
       "!node_modules/ffprobe-static/bin/linux/**",
@@ -31,7 +34,8 @@
     "win": {
       "target": [
         "portable"
-      ]
+      ],
+      "icon": "build/icon.png"
     }
   },
   "devDependencies": {
