@@ -172,6 +172,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 }
 .badge.dur { right: 8px; }
 .badge.shared { left: 8px; color: var(--ok); }
+.badge.kind { top: 8px; right: 8px; bottom: auto; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.hint { grid-column: 1 / -1; max-width: 520px; margin: 40px auto; color: var(--muted); text-align: center; }
+.games .side-label { margin-top: 14px; }
 .pick {
   position: absolute;
   top: 8px;

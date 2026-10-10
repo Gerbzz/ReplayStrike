@@ -11,6 +11,7 @@ const blankFx = () => ({ style: 'none', format: 'original', moment: null, title:
 const state = {
   clips: [],
   sources: [],
+  view: 'all', // 'all' (recordings) | 'edits' | 'shared' | 'game'
   game: null,
   query: '',
   sort: 'new',
@@ -102,9 +103,13 @@ function chipGroup(containerId, options, fx, key, onChange) {
 
 function visibleClips() {
   const q = state.query.toLowerCase();
-  const list = state.clips.filter(
-    (c) => (!state.game || c.game === state.game) && (!q || c.name.toLowerCase().includes(q) || c.game.toLowerCase().includes(q))
-  );
+  const inView = {
+    all: (c) => !c.mine,
+    edits: (c) => c.mine,
+    shared: (c) => Boolean(c.upload),
+    game: (c) => !c.mine && c.game === state.game,
+  }[state.view];
+  const list = state.clips.filter((c) => inView(c) && (!q || c.name.toLowerCase().includes(q) || c.game.toLowerCase().includes(q)));
   const by = {
     new: (a, b) => b.mtime - a.mtime,
     old: (a, b) => a.mtime - b.mtime,
@@ -126,7 +131,14 @@ function fillCard(card, clip) {
   }
   if (clip.meta) thumb.append(el('span', 'badge dur', fmtDur(clip.meta.duration)));
   if (clip.upload) thumb.append(el('span', 'badge shared', 'Shared'));
+  if (clip.mine) thumb.append(el('span', 'badge kind', clip.kind));
 }
+
+const VIEW_NAMES = { all: 'All clips', edits: 'My edits', shared: 'Shared links' };
+const VIEW_HINTS = {
+  edits: 'Nothing here yet. Open a clip and use Save edited copy, Copy for Discord or Send to YouTube, or build a highlight reel. Everything you make shows up here.',
+  shared: 'Nothing here yet. Clips you upload to Streamable show up here with their link.',
+};
 
 // Plays a muted preview on the card after a short hover.
 function attachHoverPreview(card, clip) {
@@ -197,7 +209,8 @@ function renderGrid() {
       toggleSelected(clip);
     });
     const body = el('div', 'card-body');
-    body.append(el('div', 'card-title', clip.name), el('div', 'card-sub', `${clip.game} · ${fmtDate(clip.mtime)} · ${fmtSize(clip.size)}`));
+    const from = clip.mine && clip.game === 'My edits' ? [] : [clip.game];
+    body.append(el('div', 'card-title', clip.name), el('div', 'card-sub', [...from, fmtDate(clip.mtime), fmtSize(clip.size)].join(' · ')));
     card.append(pick, el('div', 'thumb'), body);
     fillCard(card, clip);
     card.addEventListener('click', (ev) => (ev.ctrlKey || ev.shiftKey ? toggleSelected(clip) : openPlayer(clip)));
@@ -211,30 +224,38 @@ function renderGrid() {
     cards.set(clip.path, card);
     nodes.push(card);
   }
+  if (!list.length && !state.query && VIEW_HINTS[state.view]) nodes.push(el('p', 'hint', VIEW_HINTS[state.view]));
   grid.replaceChildren(...nodes);
   const none = state.clips.length === 0;
   grid.hidden = none;
   $('empty').hidden = !none;
-  $('heading').textContent = `${state.game || 'All clips'} (${list.length})`;
+  $('heading').textContent = `${state.view === 'game' ? state.game : VIEW_NAMES[state.view]} (${list.length})`;
   renderSelection();
 }
 
 function renderSidebar() {
+  const recordings = state.clips.filter((c) => !c.mine);
   const counts = new Map();
-  for (const c of state.clips) counts.set(c.game, (counts.get(c.game) || 0) + 1);
-  if (state.game && !counts.has(state.game)) state.game = null;
-  const entries = [[null, state.clips.length], ...[...counts.entries()].sort((a, b) => b[1] - a[1])];
+  for (const c of recordings) counts.set(c.game, (counts.get(c.game) || 0) + 1);
+  if (state.view === 'game' && !counts.has(state.game)) state.view = 'all';
+  const item = (view, game, label, count) => {
+    const b = el('button', 'game' + (state.view === view && (view !== 'game' || state.game === game) ? ' active' : ''));
+    b.dataset.view = view;
+    b.append(el('span', null, label), el('span', 'count', String(count)));
+    b.addEventListener('click', () => {
+      state.view = view;
+      state.game = game;
+      renderSidebar();
+      renderGrid();
+    });
+    return b;
+  };
   $('games').replaceChildren(
-    ...entries.map(([game, count]) => {
-      const b = el('button', 'game' + (game === state.game ? ' active' : ''));
-      b.append(el('span', null, game || 'All clips'), el('span', 'count', String(count)));
-      b.addEventListener('click', () => {
-        state.game = game;
-        renderSidebar();
-        renderGrid();
-      });
-      return b;
-    })
+    item('all', null, VIEW_NAMES.all, recordings.length),
+    item('edits', null, VIEW_NAMES.edits, state.clips.length - recordings.length),
+    item('shared', null, VIEW_NAMES.shared, state.clips.filter((c) => c.upload).length),
+    el('div', 'side-label', 'Games'),
+    ...[...counts.entries()].sort((a, b) => b[1] - a[1]).map(([game, count]) => item('game', game, game, count))
   );
   const found = state.sources.filter((s) => s.exists);
   $('sourcesSummary').textContent = `Watching ${found.length} folder${found.length === 1 ? '' : 's'} for new clips`;
@@ -596,7 +617,7 @@ $('discord').addEventListener('click', () => {
   runJob(
     'Rendering…',
     (job) => api.exportClip({ ...job, targetMB }),
-    (out) => `${fmtSize(out.size)} file copied. Press Ctrl+V in Discord to attach it.`
+    (out) => `${fmtSize(out.size)} file copied. Press Ctrl+V in Discord to attach it. It's also saved in My edits.`
   );
 });
 
@@ -608,7 +629,7 @@ $('saveEdit').addEventListener('click', () =>
   runJob(
     'Rendering…',
     (job) => api.exportClip({ ...job, targetMB: 0 }),
-    (out) => `Saved a ${fmtSize(out.size)} copy to Videos\\ReplayStrike and copied the file.`
+    (out) => `Saved a ${fmtSize(out.size)} copy to My edits and copied the file.`
   )
 );
 
@@ -723,6 +744,9 @@ $('reelGo').addEventListener('click', async () => {
     $('reel').close();
     await rescan();
     toast(`Highlight reel ready: ${fmtDur(out.duration)}, ${fmtSize(out.size)}.`);
+    state.view = 'edits';
+    renderSidebar();
+    renderGrid();
     const made = state.clips.find((c) => c.path === out.path);
     if (made) openPlayer(made);
   } catch (err) {

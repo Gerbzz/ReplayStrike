@@ -105,13 +105,40 @@ async function scan() {
   watch(sources);
   const uploads = config.get('uploads');
   const edits = config.get('edits');
+  const made = config.get('exports');
+  const mineRoot = exportDir().toLowerCase() + path.sep;
+  const byName = new Map(clips.map((c) => [c.name.toLowerCase(), c]));
+  // Exports made before records were kept: read the kind and source back out of "<source name> (<label>)".
+  const infer = (name) => {
+    if (/^Highlight Reel /i.test(name)) return { kind: 'Reel' };
+    const m = /^(.*) \((\d+MB|youtube|edit|trim)(?: \d+)?\)$/i.exec(name);
+    if (!m) return {};
+    const label = m[2].toLowerCase();
+    const kind = label === 'youtube' ? 'YouTube' : /mb$/.test(label) ? `Discord ${parseInt(label, 10)} MB` : 'Edit';
+    return { kind, source: byName.get(m[1].toLowerCase()) };
+  };
   return {
     sources,
     clips: clips.map((c) => {
       const id = c.path.toLowerCase();
-      return { ...c, upload: uploads[id] || null, edit: edits[id] || null };
+      const out = { ...c, upload: uploads[id] || null, edit: edits[id] || null };
+      // Anything in the exports folder is one of the user's own edits.
+      if (id.startsWith(mineRoot)) {
+        const info = made[id] || {};
+        const guess = info.kind ? {} : infer(c.name);
+        const from = (info.from && library.get(info.from)) || guess.source;
+        out.mine = true;
+        out.kind = info.kind || guess.kind || 'Edit';
+        out.game = from ? from.game : 'My edits';
+      }
+      return out;
     }),
   };
+}
+
+// Remembers how an exported file was made so My edits can label it.
+function recordExport(file, kind, from) {
+  config.set('exports', { ...config.get('exports'), [file.toLowerCase()]: { kind, from: from || null, at: Date.now() } });
 }
 
 function getPassword() {
@@ -248,6 +275,7 @@ function registerIpc() {
       (pct) => send('job:progress', { jobId, stage, pct })
     );
     servable.add(out.path);
+    recordExport(out.path, targetMB ? `Discord ${targetMB} MB` : 'Edit', clip.path);
     await copyFileToClipboard(out.path).catch(() => {});
     return out;
   });
@@ -298,6 +326,7 @@ function registerIpc() {
         (pct) => send('job:progress', { jobId, stage: 'Rendering', pct })
       );
       servable.add(out.path);
+      recordExport(out.path, 'YouTube', clip.path);
       target = out.path;
     }
     await copyFileToClipboard(target).catch(() => {});
@@ -323,6 +352,7 @@ function registerIpc() {
       (pct) => send('job:progress', { jobId, stage: 'Building reel', pct })
     );
     servable.add(out.path);
+    recordExport(out.path, 'Reel', null);
     return out;
   });
 }
@@ -355,6 +385,11 @@ function createWindow() {
       const shot = async (name) => fs.writeFileSync(path.join(smoke, name), (await win.webContents.capturePage()).toPNG());
       await wait(Number(process.env.REPLAYSTRIKE_SMOKE_WAIT) || 9000);
       await shot('library.png');
+      await js("document.querySelector('[data-view=edits]').click()");
+      await wait(1500);
+      await shot('edits.png');
+      await js("document.querySelector('[data-view=all]').click()");
+      await wait(300);
       await js("document.querySelectorAll('.pick').forEach((p, i) => i < 3 && p.click())");
       await wait(400);
       await shot('selection.png');
@@ -381,9 +416,22 @@ function createWindow() {
   }
 }
 
+// Screenshot runs get their own profile so they never share state with the real app.
+if (process.env.REPLAYSTRIKE_SMOKE) {
+  app.setPath('userData', path.join(app.getPath('temp'), 'ReplayStrike-smoke-profile'));
+} else if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+}
+
 app.whenReady().then(() => {
   const userData = app.getPath('userData');
-  config = new Store(userData, 'config.json', { folders: [], uploads: {}, edits: {}, streamableEmail: '', streamablePass: '' });
+  config = new Store(userData, 'config.json', { folders: [], uploads: {}, edits: {}, exports: {}, streamableEmail: '', streamablePass: '' });
   const metaStore = new Store(userData, 'meta.json', {});
   const thumbDir = path.join(userData, 'thumbs');
   library = new Library({ thumbDir, metaStore, onUpdate: (u) => send('clip:update', u) });

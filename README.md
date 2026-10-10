@@ -4,6 +4,10 @@ Find the game clips already on your PC, make them look great, and share them in 
 
 ReplayStrike looks for clips from NVIDIA Instant Replay / Highlights, Xbox Game Bar, AMD ReLive, Medal and Outplayed, plus anything in your Videos folder. You can add other folders in **Folders & accounts**. It never records anything and never changes your original clips; edits are saved as new files in `Videos\ReplayStrike`.
 
+## Finding things
+
+The sidebar splits the library three ways: **All clips** is your raw recordings, **My edits** is everything you saved, compressed for Discord, sent to YouTube or built as a reel (each labelled with how it was made), and **Shared links** is clips you uploaded to Streamable.
+
 ## Make it pop
 
 Open a clip and use the panel on the right. The preview updates live, and every share button uses what you set.
