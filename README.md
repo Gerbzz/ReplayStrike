@@ -42,16 +42,36 @@ YouTube is a hand-off rather than a direct upload because YouTube locks videos u
 
 ## Run from source
 
+ReplayStrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
+
 ```bash
 npm install
-npm rebuild ffmpeg-static
-npm start
+powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg.ps1
+npm run dev
 ```
 
-## Build the portable .exe
+`fetch-ffmpeg.ps1` downloads the ffmpeg and ffprobe binaries the app bundles; they are too large to keep in git.
+
+## Build the installer
 
 ```bash
-npm run dist
+npm run build
 ```
 
-The result is `dist/ReplayStrike 0.2.0.exe`: a single file with ffmpeg included that runs on any 64-bit Windows 10/11 PC without installing anything. `npm run icon` regenerates the app icon.
+The result is `src-tauri/target/release/bundle/nsis/ReplayStrike_0.3.0_x64-setup.exe`: a per-user installer with ffmpeg included, for 64-bit Windows 10/11. `npm run icons` regenerates the app icons from `build/icon.png`.
+
+## Layout
+
+| Path | What it holds |
+| --- | --- |
+| `src-tauri/src/main.rs` | App setup and every command the interface can call |
+| `src-tauri/src/ffmpeg.rs` | Probing, thumbnails, the effects filter graph, exports and reels |
+| `src-tauri/src/detect.rs` | Finding recorder folders (registry and known locations) |
+| `src-tauri/src/library.rs` | Scanning folders into clips |
+| `src-tauri/src/streamable.rs` | Streamable upload |
+| `src-tauri/src/store.rs` | JSON settings storage |
+| `renderer/bridge.js` | The only place the interface talks to Rust |
+
+## Building on Windows
+
+Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.

@@ -74,7 +74,7 @@ function errorText(err) {
   return String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 }
 
-const fileUrl = (file) => `clip://file/?p=${encodeURIComponent(file)}`;
+const fileUrl = (file) => api.fileUrl(file);
 const fxPayload = (fx) => ({ ...fx, music: fx.music ? fx.music.path : null });
 const fxActive = (fx) => fx.style !== 'none' || fx.format !== 'original' || fx.moment != null || Boolean(fx.title.trim()) || fx.fades || Boolean(fx.music) || fx.gameVol !== 1;
 
@@ -646,7 +646,7 @@ $('reveal').addEventListener('click', () => api.reveal(state.current.path));
 
 $('trash').addEventListener('click', async () => {
   const clip = state.current;
-  if (!confirm(`Move "${clip.name}" to the Recycle Bin?`)) return;
+  if (!(await api.confirm(`Move "${clip.name}" to the Recycle Bin?`, 'Move to Recycle Bin'))) return;
   try {
     closePlayer();
     await api.trash(clip.path);
@@ -796,6 +796,13 @@ $('addFolder').addEventListener('click', addFolder);
 $('emptyAdd').addEventListener('click', addFolder);
 
 /* ---------- toolbar + live updates ---------- */
+
+$('winMin').addEventListener('click', () => api.minimize());
+$('winMax').addEventListener('click', () => api.toggleMaximize());
+$('winClose').addEventListener('click', () => api.close());
+document.querySelector('.toolbar').addEventListener('dblclick', (ev) => {
+  if (ev.target.hasAttribute('data-tauri-drag-region')) api.toggleMaximize();
+});
 
 $('search').addEventListener('input', (ev) => {
   state.query = ev.target.value;

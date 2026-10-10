@@ -1,0 +1,35 @@
+[package]
+name = "replaystrike"
+version = "0.3.0"
+description = "Find your game clips, make them look great, and share them in seconds."
+authors = ["Gerbzz"]
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "fs", "sync", "time", "rt"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["multipart", "stream", "json"] }
+notify = "6.1"
+winreg = "0.52"
+trash = "5"
+arboard = "3"
+keyring = { version = "3", features = ["windows-native"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
