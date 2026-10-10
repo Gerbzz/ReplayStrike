@@ -131,6 +131,20 @@ pub async fn thumbnail(file: &Path, duration: f64, out: &Path) -> Result<(), Str
     run("ffmpeg", args.0, None, |_| {}).await.map(|_| ())
 }
 
+/// Writes the clip's audio (all tracks mixed) as 16 kHz mono WAV for analysis.
+pub async fn extract_wav(file: &Path, audio_tracks: u32, out: &Path) -> Result<(), String> {
+    let mut args = Args::new();
+    args.add(&["-v", "error", "-i"]).arg(file);
+    if audio_tracks > 1 {
+        let ins: String = (0..audio_tracks).map(|i| format!("[0:a:{i}]")).collect();
+        args.add(&["-filter_complex", &format!("{ins}amix=inputs={audio_tracks}:normalize=0[a]"), "-map", "[a]"]);
+    } else {
+        args.add(&["-vn"]);
+    }
+    args.add(&["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-y"]).arg(out);
+    run("ffmpeg", args.0, None, |_| {}).await.map(|_| ())
+}
+
 fn unique_path(dir: &Path, base: &str, label: &str) -> PathBuf {
     let mut n = 0;
     loop {
@@ -472,16 +486,16 @@ pub struct Segment {
 
 /// Renders each segment to matching 60fps files, then joins them without a
 /// second video encode. Music, if any, is laid over the whole reel.
-pub async fn make_reel(segments: &[Segment], fx: &Fx, out_dir: &Path, tmp_dir: &Path, on: Progress<'_>) -> Result<ExportOut, String> {
+pub async fn make_reel(segments: &[Segment], fx: &Fx, name: &str, out_dir: &Path, tmp_dir: &Path, on: Progress<'_>) -> Result<ExportOut, String> {
     let fx = fx.normalized();
     std::fs::create_dir_all(tmp_dir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
-    let result = build_reel(segments, &fx, out_dir, tmp_dir, on).await;
+    let result = build_reel(segments, &fx, name, out_dir, tmp_dir, on).await;
     let _ = std::fs::remove_dir_all(tmp_dir);
     result
 }
 
-async fn build_reel(segments: &[Segment], fx: &Fx, out_dir: &Path, tmp_dir: &Path, on: Progress<'_>) -> Result<ExportOut, String> {
+async fn build_reel(segments: &[Segment], fx: &Fx, name: &str, out_dir: &Path, tmp_dir: &Path, on: Progress<'_>) -> Result<ExportOut, String> {
     let count = segments.len() as f64;
     let mut total = 0.0;
     for (i, seg) in segments.iter().enumerate() {
@@ -507,7 +521,7 @@ async fn build_reel(segments: &[Segment], fx: &Fx, out_dir: &Path, tmp_dir: &Pat
     std::fs::write(tmp_dir.join("list.txt"), list.join("\n")).map_err(|e| e.to_string())?;
 
     let stamp = chrono::Local::now().format("%Y.%m.%d - %H.%M").to_string();
-    let out = unique_path(out_dir, &format!("Highlight Reel {stamp}"), &format!("{} clips", segments.len()));
+    let out = unique_path(out_dir, &format!("{name} {stamp}"), &format!("{} clips", segments.len()));
     let mut args = Args::new();
     args.add(&["-f", "concat", "-safe", "0", "-i", "list.txt"]);
     if let Some(music) = &fx.music {

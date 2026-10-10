@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analyze;
 mod detect;
 mod ffmpeg;
 mod library;
@@ -31,6 +32,10 @@ const KEYRING_USER: &str = "streamable";
 struct AppState {
     config: Store,
     meta: Store,
+    /// %APPDATA%\ReplayStrike: settings, caches, the speech model.
+    data: PathBuf,
+    /// Only one transcription runs at a time; it already uses every core.
+    analysis_lock: tokio::sync::Mutex<()>,
     thumbs: PathBuf,
     exports: PathBuf,
     temp: PathBuf,
@@ -64,7 +69,11 @@ struct ScanResult {
 /// Exports made before records were kept: read the kind and source name back
 /// out of "<source name> (<label>)".
 fn infer_export(name: &str) -> (Option<String>, Option<String>) {
-    if name.to_lowercase().starts_with("highlight reel ") {
+    let lower = name.to_lowercase();
+    if lower.starts_with("montage ") {
+        return (Some("Montage".into()), None);
+    }
+    if lower.starts_with("highlight reel ") {
         return (Some("Reel".into()), None);
     }
     let Some(open) = name.rfind(" (") else { return (None, None) };
@@ -109,6 +118,7 @@ async fn scan(app: AppHandle) -> Result<ScanResult, String> {
         if clip.meta.is_some() && thumb.exists() {
             clip.thumb = Some(thumb.to_string_lossy().into_owned());
         }
+        clip.hype = load_analysis(&st, &clip.key).map(|a| a.moments.len());
         clip.upload = uploads.get(&id).cloned();
         clip.edit = edits.get(&id).cloned();
         // Anything in the exports folder is one of the user's own edits.
@@ -433,8 +443,8 @@ fn clean_fx(st: &State, fx: Option<Fx>) -> Fx {
     fx
 }
 
-fn progress(app: &AppHandle, job_id: &str, stage: &'static str) -> impl Fn(f64) + Send + Sync + 'static {
-    let (app, job_id) = (app.clone(), job_id.to_string());
+fn progress(app: &AppHandle, job_id: &str, stage: &str) -> impl Fn(f64) + Send + Sync + 'static {
+    let (app, job_id, stage) = (app.clone(), job_id.to_string(), stage.to_string());
     move |pct| {
         let _ = app.emit("job:progress", json!({ "jobId": job_id, "stage": stage, "pct": pct }));
     }
@@ -563,8 +573,131 @@ async fn reel_run(app: AppHandle, job: ReelJob) -> Result<ExportOut, String> {
     let fx = clean_fx(&st, job.fx);
     let tmp = st.temp.join(format!("reel-{}", chrono::Local::now().timestamp_millis()));
     let on = progress(&app, &job.job_id, "Building reel");
-    let out = ffmpeg::make_reel(&segments, &fx, &st.exports, &tmp, &on).await?;
+    let out = ffmpeg::make_reel(&segments, &fx, "Highlight Reel", &st.exports, &tmp, &on).await?;
     record_export(&st, &out.path, "Reel", None);
+    Ok(out)
+}
+
+/* ---------- hype moments ---------- */
+
+/// Seconds kept before and after a hype moment when cutting it out.
+const MOMENT_BEFORE: f64 = 6.0;
+const MOMENT_AFTER: f64 = 3.0;
+
+fn analysis_path(st: &State, key: &str) -> PathBuf {
+    st.data.join("analysis").join(format!("{key}.json"))
+}
+
+fn load_analysis(st: &State, key: &str) -> Option<analyze::Analysis> {
+    serde_json::from_str(&std::fs::read_to_string(analysis_path(st, key)).ok()?).ok()
+}
+
+fn model_path(st: &State) -> PathBuf {
+    st.data.join("models").join(analyze::MODEL_FILE)
+}
+
+#[tauri::command]
+fn hype_status(app: AppHandle) -> Value {
+    let st = state(&app);
+    json!({ "engine": analyze::whisper_bin().is_some(), "model": model_path(&st).exists(), "modelMB": analyze::MODEL_MB })
+}
+
+#[tauri::command]
+fn get_analysis(app: AppHandle, file: String) -> Option<analyze::Analysis> {
+    let st = state(&app);
+    let key = st.clips.lock().unwrap().get(&file.to_lowercase())?.key.clone();
+    load_analysis(&st, &key)
+}
+
+/// Returns the clip's cached analysis, or transcribes it now. The speech
+/// model is downloaded the first time it is needed.
+async fn ensure_analysis(app: &AppHandle, st: &State, clip: &Clip, meta: &Meta, job_id: &str, label: &str) -> Result<analyze::Analysis, String> {
+    if let Some(found) = load_analysis(st, &clip.key) {
+        return Ok(found);
+    }
+    let bin = analyze::whisper_bin().ok_or("This build does not include the speech engine.")?;
+    let _turn = st.analysis_lock.lock().await;
+    let model = model_path(st);
+    if !model.exists() {
+        analyze::download_model(&model, &progress(app, job_id, "Downloading speech model")).await?;
+    }
+    let found = analyze::analyze(Path::new(&clip.path), meta, &bin, &model, &st.temp, &progress(app, job_id, label)).await?;
+    let path = analysis_path(st, &clip.key);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, serde_json::to_string(&found).map_err(err)?);
+    if let Some(c) = st.clips.lock().unwrap().get_mut(&clip.path.to_lowercase()) {
+        c.hype = Some(found.moments.len());
+    }
+    Ok(found)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnalyzeJob {
+    job_id: String,
+    file: String,
+}
+
+#[tauri::command]
+async fn analyze_run(app: AppHandle, job: AnalyzeJob) -> Result<analyze::Analysis, String> {
+    let st = state(&app);
+    let (clip, meta) = clip_for(&st, &job.file)?;
+    ensure_analysis(&app, &st, &clip, &meta, &job.job_id, "Listening for hype moments").await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MontageJob {
+    job_id: String,
+    files: Vec<String>,
+    count: usize,
+    #[serde(default)]
+    fx: Option<Fx>,
+}
+
+/// Analyses the chosen clips, keeps the strongest moments across all of
+/// them and joins those into one montage, in the order they happened.
+#[tauri::command]
+async fn montage_run(app: AppHandle, job: MontageJob) -> Result<ExportOut, String> {
+    let st = state(&app);
+    if job.files.is_empty() {
+        return Err("Pick at least one clip.".into());
+    }
+    let total = job.files.len();
+    let mut found: Vec<(Clip, Meta, analyze::Moment)> = Vec::new();
+    for (i, file) in job.files.iter().enumerate() {
+        let (clip, meta) = clip_for(&st, file)?;
+        let label = format!("Listening to clip {} of {total}", i + 1);
+        let analysis = ensure_analysis(&app, &st, &clip, &meta, &job.job_id, &label).await?;
+        found.extend(analysis.moments.into_iter().map(|m| (clip.clone(), meta.clone(), m)));
+    }
+    if found.is_empty() {
+        return Err("No hype moments were found in those clips.".into());
+    }
+    found.sort_by(|a, b| b.2.score.total_cmp(&a.2.score));
+    found.truncate(job.count.clamp(1, 20));
+    let best = found[0].2.score;
+    found.sort_by(|a, b| a.0.mtime.total_cmp(&b.0.mtime).then(a.2.t.total_cmp(&b.2.t)));
+
+    let segments: Vec<Segment> = found
+        .iter()
+        .map(|(clip, meta, m)| Segment {
+            src: PathBuf::from(&clip.path),
+            start: (m.t - MOMENT_BEFORE).max(0.0),
+            end: (m.t + MOMENT_AFTER).min(meta.duration),
+            meta: meta.clone(),
+            src_size: clip.size,
+            // Slow-mo is saved for the single biggest moment.
+            moment: (m.score >= best).then_some(m.t),
+        })
+        .collect();
+    let fx = clean_fx(&st, job.fx);
+    let tmp = st.temp.join(format!("montage-{}", chrono::Local::now().timestamp_millis()));
+    let on = progress(&app, &job.job_id, "Building montage");
+    let out = ffmpeg::make_reel(&segments, &fx, "Montage", &st.exports, &tmp, &on).await?;
+    record_export(&st, &out.path, "Montage", None);
     Ok(out)
 }
 
@@ -610,9 +743,25 @@ async fn selftest(clips_dir: PathBuf, out_dir: PathBuf) -> Result<String, String
         segments.push(Segment { src: PathBuf::from(&c.path), start: (m.duration - 6.0).max(0.0), end: m.duration, meta: m, src_size: c.size, moment: None });
     }
     let fx = Fx { style: "cinematic".into(), title: "Reel test".into(), ..Fx::default() };
-    let reel = ffmpeg::make_reel(&segments, &fx, &out_dir, &out_dir.join("tmp"), &|_| {}).await?;
+    let reel = ffmpeg::make_reel(&segments, &fx, "Highlight Reel", &out_dir, &out_dir.join("tmp"), &|_| {}).await?;
     let m = ffmpeg::probe(Path::new(&reel.path)).await?;
     log += &format!("reel    {:>7.2}MB {}x{}@{} {:.2}s expected {:.2}s\n", reel.size as f64 / 1_048_576.0, m.width, m.height, m.fps, m.duration, reel.duration);
+
+    let model = PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("ReplayStrike").join("models").join(analyze::MODEL_FILE);
+    match analyze::whisper_bin().filter(|_| model.exists()) {
+        None => log += "hype    skipped (speech engine or model missing)\n",
+        Some(bin) => {
+            for c in clips.iter().take(2) {
+                let m = ffmpeg::probe(Path::new(&c.path)).await?;
+                let started = std::time::Instant::now();
+                let a = analyze::analyze(Path::new(&c.path), &m, &bin, &model, &out_dir, &|_| {}).await?;
+                log += &format!("hype    {} ({:.0}s clip, {:.1}s to analyse): {} lines, {} moments\n", c.name, m.duration, started.elapsed().as_secs_f64(), a.lines.len(), a.moments.len());
+                for mo in &a.moments {
+                    log += &format!("          {:>6.1}s score {:>4.1} {} {}\n", mo.t, mo.score, if mo.spoken { "said:" } else { "" }, mo.reason);
+                }
+            }
+        }
+    }
     Ok(log)
 }
 
@@ -667,6 +816,8 @@ fn main() {
             app.manage(Arc::new(AppState {
                 config: Store::open(data.join("config.json")),
                 meta: Store::open(data.join("meta-v2.json")),
+                data,
+                analysis_lock: tokio::sync::Mutex::new(()),
                 thumbs,
                 exports,
                 temp: std::env::temp_dir().join("ReplayStrike"),
@@ -698,7 +849,11 @@ fn main() {
             export_run,
             upload_streamable,
             upload_youtube,
-            reel_run
+            reel_run,
+            hype_status,
+            get_analysis,
+            analyze_run,
+            montage_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReplayStrike");

@@ -28,6 +28,8 @@ pub struct Clip {
     pub edit: Option<Value>,
     pub mine: bool,
     pub kind: Option<String>,
+    /// Number of hype moments found, once the clip has been analysed.
+    pub hype: Option<usize>,
 }
 
 /// Cache key that changes whenever the file's contents could have.
@@ -103,6 +105,7 @@ pub fn scan_files(sources: &mut [Source]) -> Vec<Clip> {
                 edit: None,
                 mine: false,
                 kind: None,
+                hype: None,
             });
         }
     }

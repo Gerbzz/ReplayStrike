@@ -269,6 +269,37 @@ dialog::backdrop { background: rgba(4, 5, 8, .82); }
 .trim-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .trim-label { flex: 1; text-align: center; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
+.hype-list { display: grid; gap: 4px; margin: 8px 0; }
+.hype-list:empty { display: none; }
+.hype {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.hype:hover { border-color: var(--accent); }
+.hype:first-child { border-color: var(--accent); background: var(--accent-soft); }
+.hype time { color: var(--accent-hi); font-weight: 650; font-variant-numeric: tabular-nums; }
+.hype span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#trimHype i { position: absolute; top: 3px; bottom: 3px; width: 3px; margin-left: -1px; border-radius: 2px; background: #ffc53d; pointer-events: none; }
+.transcript { margin-top: 10px; font-size: 13px; }
+.transcript[hidden] { display: none; }
+.transcript summary { color: var(--muted); cursor: pointer; }
+.transcript button { display: grid; grid-template-columns: 40px 1fr; gap: 8px; width: 100%; padding: 4px 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.transcript button:hover { color: var(--accent-hi); }
+.transcript time { color: var(--muted); font-variant-numeric: tabular-nums; }
+#transcriptLines { max-height: 220px; margin-top: 6px; overflow-y: auto; user-select: text; }
+.chips.four { grid-template-columns: repeat(4, 1fr); }
+#reelCountField[hidden] { display: none; }
+
 .field-label { margin: 12px 0 6px; color: var(--muted); font-size: 12px; }
 .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .chip {

@@ -44,7 +44,8 @@
     </section>
     <div class="selbar" id="selbar" hidden>
       <span id="selCount"></span>
-      <button class="btn primary" id="makeReel">Create highlight reel</button>
+      <button class="btn primary" id="makeMontage">Auto montage</button>
+      <button class="btn" id="makeReel">Create highlight reel</button>
       <button class="btn ghost" id="clearSel">Clear</button>
     </div>
   </main>
@@ -66,6 +67,7 @@
       <div class="video-note" id="videoNote" hidden></div>
       <div class="trim" id="trim">
         <div class="trim-range" id="trimRange"></div>
+        <div id="trimHype"></div>
         <div class="trim-moment" id="trimMoment" hidden></div>
         <div class="trim-head" id="trimHead"></div>
         <div class="trim-handle" id="trimStart" data-edge="0"></div>
@@ -84,6 +86,18 @@
       <div class="side-scroll">
       <h2 id="clipTitle"></h2>
       <p class="muted" id="clipMeta"></p>
+
+      <h3>Hype moments</h3>
+      <p class="muted" id="hypeHint"></p>
+      <div class="hype-list" id="hypeList"></div>
+      <div class="inline">
+        <button class="btn small grow" id="hypeFind">Find hype moments</button>
+        <button class="btn primary small" id="hypeAuto" hidden>Auto highlight</button>
+      </div>
+      <details class="transcript" id="transcript" hidden>
+        <summary>Transcript</summary>
+        <div id="transcriptLines"></div>
+      </details>
 
       <h3>Make it pop</h3>
       <div class="field-label">Look</div>
@@ -145,9 +159,13 @@
 
   <dialog class="sheet" id="reel">
     <button class="close" id="closeReel" aria-label="Close">&times;</button>
-    <h2>Highlight reel</h2>
+    <h2 id="reelHeading">Highlight reel</h2>
     <p class="muted" id="reelNote"></p>
     <ol class="reel-list" id="reelList"></ol>
+    <div id="reelCountField">
+      <div class="field-label">Moments to include</div>
+      <div class="chips four" id="reelCountChips"></div>
+    </div>
     <div class="field-label">Look</div>
     <div class="chips" id="reelStyleChips"></div>
     <div class="field-label">Shape</div>

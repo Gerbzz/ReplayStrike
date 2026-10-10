@@ -21,6 +21,10 @@ const state = {
   trim: [0, 0],
   fx: blankFx(),
   reelFx: blankFx(),
+  reelMode: 'reel', // 'reel' (clips as trimmed) | 'montage' (best hype moments)
+  montage: { count: 5 },
+  hype: { engine: false, model: false, modelMB: 0 },
+  analysis: null, // transcript + hype moments of the open clip
   busy: false,
   jobId: null,
   onProgress: null,
@@ -182,8 +186,9 @@ function renderSelection() {
   const count = state.selected.length;
   $('grid').classList.toggle('picking', count > 0);
   $('selbar').hidden = count === 0;
-  $('selCount').textContent = count === 1 ? '1 clip selected. Pick at least one more.' : `${count} clips selected`;
+  $('selCount').textContent = `${count} clip${count === 1 ? '' : 's'} selected`;
   $('makeReel').disabled = count < 2;
+  $('makeMontage').hidden = !state.hype.engine;
 }
 
 function renderGrid() {
@@ -210,7 +215,8 @@ function renderGrid() {
     });
     const body = el('div', 'card-body');
     const from = clip.mine && clip.game === 'My edits' ? [] : [clip.game];
-    body.append(el('div', 'card-title', clip.name), el('div', 'card-sub', [...from, fmtDate(clip.mtime), fmtSize(clip.size)].join(' · ')));
+    const hype = clip.hype ? [`${clip.hype} hype moment${clip.hype === 1 ? '' : 's'}`] : [];
+    body.append(el('div', 'card-title', clip.name), el('div', 'card-sub', [...from, fmtDate(clip.mtime), fmtSize(clip.size), ...hype].join(' · ')));
     card.append(pick, el('div', 'thumb'), body);
     fillCard(card, clip);
     card.addEventListener('click', (ev) => (ev.ctrlKey || ev.shiftKey ? toggleSelected(clip) : openPlayer(clip)));
@@ -413,7 +419,7 @@ function setStatus(kind, text, pct) {
 
 function setBusy(busy) {
   state.busy = busy;
-  for (const id of ['upStreamable', 'discord', 'upYouTube', 'copyFile', 'trash', 'discordSize']) $(id).disabled = busy;
+  for (const id of ['upStreamable', 'discord', 'upYouTube', 'copyFile', 'trash', 'discordSize', 'hypeFind']) $(id).disabled = busy;
   renderTrim();
 }
 
@@ -434,6 +440,14 @@ function openPlayer(clip) {
   video.src = fileUrl(clip.path);
   $('player').showModal();
   renderFx();
+  state.analysis = null;
+  renderHype();
+  api.getAnalysis(clip.path).then((found) => {
+    if (found && state.current === clip) {
+      state.analysis = found;
+      renderHype();
+    }
+  });
   video.play().catch(() => {});
 }
 
@@ -520,6 +534,81 @@ $('player').addEventListener('keydown', (ev) => {
 $('player').addEventListener('close', closePlayer);
 $('player').addEventListener('cancel', (ev) => state.busy && ev.preventDefault());
 $('closePlayer').addEventListener('click', () => !state.busy && closePlayer());
+
+/* ---------- hype moments ---------- */
+
+function seekTo(t) {
+  video.currentTime = Math.max(0, t);
+  video.play().catch(() => {});
+}
+
+function renderHype() {
+  const a = state.analysis;
+  const d = state.duration || (state.current && state.current.meta && state.current.meta.duration) || 1;
+  $('hypeHint').textContent = !state.hype.engine
+    ? 'Not available in this build.'
+    : a
+      ? a.moments.length
+        ? 'Best first. Click one to watch it.'
+        : 'No standout moments found in this clip.'
+      : state.hype.model
+        ? 'Listens to the clip and marks its most exciting moments.'
+        : `Listens to the clip and marks its most exciting moments. First use downloads a ${state.hype.modelMB} MB speech model; after that everything runs on this PC.`;
+  $('hypeFind').hidden = Boolean(a) || !state.hype.engine;
+  $('hypeAuto').hidden = !(a && a.moments.length);
+  $('hypeList').replaceChildren(
+    ...(a ? a.moments : []).map((m) => {
+      const b = el('button', 'hype');
+      b.append(el('time', null, fmtDur(m.t)), el('span', null, m.spoken ? `“${m.reason}”` : m.reason));
+      b.title = m.reason;
+      b.addEventListener('click', () => seekTo(m.t - 3));
+      return b;
+    })
+  );
+  $('trimHype').replaceChildren(
+    ...(a ? a.moments : []).map((m) => {
+      const tick = el('i');
+      tick.style.left = `${(m.t / d) * 100}%`;
+      return tick;
+    })
+  );
+  $('transcript').hidden = !(a && a.lines.length);
+  $('transcriptLines').replaceChildren(
+    ...(a ? a.lines : []).map((line) => {
+      const b = el('button');
+      b.append(el('time', null, fmtDur(line.from)), el('span', null, line.text));
+      b.addEventListener('click', () => seekTo(line.from));
+      return b;
+    })
+  );
+}
+
+$('hypeFind').addEventListener('click', () =>
+  runJob(
+    'Listening…',
+    async (job, clip) => {
+      const found = await api.analyze({ jobId: job.jobId, file: job.file });
+      state.hype.model = true;
+      clip.hype = found.moments.length;
+      if (state.current === clip) {
+        state.analysis = found;
+        renderHype();
+      }
+      return found;
+    },
+    (found) => (found.moments.length ? `Found ${found.moments.length} hype moment${found.moments.length === 1 ? '' : 's'}.` : 'No standout moments found in this clip.')
+  )
+);
+
+// Trims around the best moment and puts the slow-mo on it.
+$('hypeAuto').addEventListener('click', () => {
+  const best = state.analysis && state.analysis.moments[0];
+  if (!best || !state.duration) return;
+  state.trim = [Math.max(0, best.t - 8), Math.min(state.duration, best.t + 4)];
+  setMoment(best.t);
+  seekTo(state.trim[0]);
+  toast('Trimmed to the best moment with slow-mo on it. Share it or keep tweaking.');
+});
 
 /* ---------- effects controls ---------- */
 
@@ -687,17 +776,36 @@ function renderReelMusic() {
   $('reelVolOut').textContent = `${Math.round(fx.gameVol * 100)}%`;
 }
 
-$('makeReel').addEventListener('click', async () => {
+const renderReelCount = chipGroup('reelCountChips', [[3, '3'], [5, '5'], [8, '8'], [12, '12']], () => state.montage, 'count');
+
+async function openReelDialog(mode) {
+  state.reelMode = mode;
+  const montage = mode === 'montage';
   const s = await api.getSettings();
   const picked = state.selected.map((p) => state.clips.find((c) => c.path === p)).filter(Boolean);
-  $('reelNote').textContent = `Clips play in the order you picked them. Each one uses the trim and slow-mo you set on it; untrimmed clips use their last ${s.reelSeconds} seconds.`;
-  $('reelList').replaceChildren(
-    ...picked.map((c) => {
-      const trim = c.edit && c.edit.trim;
-      const len = trim ? trim[1] - trim[0] : Math.min(s.reelSeconds, (c.meta && c.meta.duration) || s.reelSeconds);
-      return el('li', null, `${c.name} · ${fmtDur(len)}${trim ? ' (your trim)' : ''}`);
-    })
-  );
+  $('reelHeading').textContent = montage ? 'Auto montage' : 'Highlight reel';
+  $('reelGo').textContent = montage ? 'Build montage' : 'Build reel';
+  $('reelCountField').hidden = !montage;
+  if (montage) {
+    const todo = picked.filter((c) => c.hype == null).length;
+    $('reelNote').textContent =
+      `ReplayStrike listens to each clip, picks the most exciting moments across all of them and cuts about 9 seconds around each, in the order they happened. The biggest moment gets slow-mo.` +
+      (todo ? ` ${todo} clip${todo === 1 ? ' needs' : 's need'} analysing first, roughly 5 seconds per minute of footage.` : '') +
+      (state.hype.model ? '' : ` First use downloads a ${state.hype.modelMB} MB speech model.`);
+    $('reelList').replaceChildren(
+      ...picked.map((c) => el('li', null, `${c.name} · ${c.hype == null ? 'not analysed yet' : `${c.hype} hype moment${c.hype === 1 ? '' : 's'}`}`))
+    );
+    renderReelCount();
+  } else {
+    $('reelNote').textContent = `Clips play in the order you picked them. Each one uses the trim and slow-mo you set on it; untrimmed clips use their last ${s.reelSeconds} seconds.`;
+    $('reelList').replaceChildren(
+      ...picked.map((c) => {
+        const trim = c.edit && c.edit.trim;
+        const len = trim ? trim[1] - trim[0] : Math.min(s.reelSeconds, (c.meta && c.meta.duration) || s.reelSeconds);
+        return el('li', null, `${c.name} · ${fmtDur(len)}${trim ? ' (your trim)' : ''}`);
+      })
+    );
+  }
   renderReelStyle();
   renderReelFormat();
   $('reelTitle').value = state.reelFx.title;
@@ -705,7 +813,10 @@ $('makeReel').addEventListener('click', async () => {
   setReelStatus(null);
   $('reelGo').disabled = false;
   $('reel').showModal();
-});
+}
+
+$('makeReel').addEventListener('click', () => openReelDialog('reel'));
+$('makeMontage').addEventListener('click', () => openReelDialog('montage'));
 
 $('reelTitle').addEventListener('input', (ev) => (state.reelFx.title = ev.target.value));
 $('reelVol').addEventListener('input', (ev) => {
@@ -737,13 +848,16 @@ $('reelGo').addEventListener('click', async () => {
   state.busy = true;
   state.onProgress = (stage, pct) => setReelStatus('run', `${stage}… ${Math.round(pct * 100)}%`, pct);
   $('reelGo').disabled = true;
-  setReelStatus('run', 'Building reel…', 0);
+  const montage = state.reelMode === 'montage';
+  setReelStatus('run', montage ? 'Listening…' : 'Building reel…', 0);
   try {
-    const out = await api.makeReel({ jobId, files: state.selected, fx: fxPayload(state.reelFx) });
+    const job = { jobId, files: state.selected, fx: fxPayload(state.reelFx) };
+    const out = montage ? await api.makeMontage({ ...job, count: state.montage.count }) : await api.makeReel(job);
+    if (montage) state.hype.model = true;
     state.selected = [];
     $('reel').close();
     await rescan();
-    toast(`Highlight reel ready: ${fmtDur(out.duration)}, ${fmtSize(out.size)}.`);
+    toast(`${montage ? 'Montage' : 'Highlight reel'} ready: ${fmtDur(out.duration)}, ${fmtSize(out.size)}.`);
     state.view = 'edits';
     renderSidebar();
     renderGrid();
@@ -828,4 +942,8 @@ api.onClipUpdate(({ path, meta, thumb }) => {
 
 api.onLibraryChanged(() => rescan());
 
+api.hypeStatus().then((status) => {
+  state.hype = status;
+  renderSelection();
+});
 rescan();

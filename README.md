@@ -46,11 +46,11 @@ ReplayStrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/C
 
 ```bash
 npm install
-powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg.ps1
+powershell -ExecutionPolicy Bypass -File scripts\fetch-binaries.ps1
 npm run dev
 ```
 
-`fetch-ffmpeg.ps1` downloads the ffmpeg and ffprobe binaries the app bundles; they are too large to keep in git.
+`fetch-binaries.ps1` downloads ffmpeg, ffprobe and the whisper.cpp speech engine that the app bundles; they are too large to keep in git.
 
 ## Build the installer
 
@@ -75,3 +75,11 @@ The result is `src-tauri/target/release/bundle/nsis/ReplayStrike_0.3.0_x64-setup
 ## Building on Windows
 
 Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
+
+## Hype moments and auto montage
+
+Open a clip and press **Find hype moments**. ReplayStrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
+
+Select one or more clips and press **Auto montage** to analyse them all, keep the strongest moments across them and join those into one video, in the order they happened.
+
+The speech model (about 141 MB) is downloaded the first time you use this and is kept in `%APPDATA%\ReplayStrike\models`. Nothing is uploaded; transcription runs locally with whisper.cpp. The model is English-only.
