@@ -216,6 +216,7 @@ function registerIpc() {
 
   // Remembers each clip's trim and slow-mo moment between sessions.
   ipcMain.handle('edit:save', (_e, { file, trim, moment }) => {
+    if (process.env.REPLAYSTRIKE_SMOKE) return true; // screenshot runs must not touch real edits
     const edits = { ...config.get('edits') };
     const id = String(file).toLowerCase();
     if (trim || moment != null) edits[id] = { trim: trim || null, moment: moment == null ? null : moment };
