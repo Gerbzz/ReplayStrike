@@ -1,10 +1,10 @@
-# replaystrike
+# ReplayStrike
 
 Find the game clips already on your PC, make them look great, and share them in seconds.
 
 **Status:** Windows source prototype. The repository contains clip scanning, editing/export, reel, local analysis, and sharing paths, but this publication pass did not build the app or verify those workflows on a clean machine. No installer or downloaded media engine is included in Git.
 
-replaystrike looks for clips from NVIDIA Instant Replay / Highlights, Xbox Game Bar, AMD ReLive, Medal and Outplayed, plus anything in your Videos folder. You can add other folders in **Folders & accounts**. It never records anything and never changes your original clips; edits are saved as new files in `Videos\ReplayStrike`.
+ReplayStrike looks for clips from NVIDIA Instant Replay / Highlights, Xbox Game Bar, AMD ReLive, Medal and Outplayed, plus anything in your Videos folder. You can add other folders in **Folders & accounts**. It never records anything and never changes your original clips; edits are saved as new files in `Videos\ReplayStrike`.
 
 ## Finding things
 
@@ -44,7 +44,7 @@ The YouTube action prepares a file and opens the upload page; it does not upload
 
 ## Run from source
 
-replaystrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
+ReplayStrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
 
 ```bash
 npm install
@@ -76,11 +76,11 @@ The build is configured for a per-user NSIS installer at `src-tauri/target/relea
 
 ## Building on Windows
 
-Keep the project at a path without an apostrophe (for example `C:\Dev\replaystrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
+Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
 
 ## Hype moments and auto montage
 
-Open a clip and press **Find hype moments**. replaystrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
+Open a clip and press **Find hype moments**. ReplayStrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
 
 Select one or more clips and press **Auto montage** to analyse them all, keep the strongest moments across them and join those into one video, in the order they happened.
 
