@@ -6,7 +6,7 @@
 
 ReplayStrike gathers existing game recordings from common Windows clip folders into a personal library. Trim and style a favorite, combine clips into a reel, or prepare a file or link to share while keeping the original recordings intact.
 
-### Highlights
+## Highlights
 
 - Find clips from common recorders and folders you add.
 - Trim, style, and combine clips into highlight reels.
@@ -52,6 +52,14 @@ Streamable needs an account (email and password, entered in **Folders & accounts
 
 The YouTube action prepares a file and opens the upload page; it does not upload directly.
 
+## Hype moments and auto montage
+
+Open a clip and press **Find hype moments**. ReplayStrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
+
+Select one or more clips and press **Auto montage** to analyse them all, keep the strongest moments across them and join those into one video, in the order they happened.
+
+The speech model (about 141 MB) is downloaded the first time you use this and is kept in `%APPDATA%\ReplayStrike\models`. Nothing is uploaded; transcription runs locally with whisper.cpp. The model is English-only.
+
 ## Run from source
 
 ReplayStrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
@@ -88,10 +96,3 @@ The build is configured for a per-user NSIS installer at `src-tauri/target/relea
 
 Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
 
-## Hype moments and auto montage
-
-Open a clip and press **Find hype moments**. ReplayStrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
-
-Select one or more clips and press **Auto montage** to analyse them all, keep the strongest moments across them and join those into one video, in the order they happened.
-
-The speech model (about 141 MB) is downloaded the first time you use this and is kept in `%APPDATA%\ReplayStrike\models`. Nothing is uploaded; transcription runs locally with whisper.cpp. The model is English-only.
