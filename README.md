@@ -76,7 +76,7 @@ The build is configured for a per-user NSIS installer at `src-tauri/target/relea
 
 ## Building on Windows
 
-Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
+Keep the project at a path without an apostrophe (for example `C:\Dev\replaystrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
 
 ## Hype moments and auto montage
 
