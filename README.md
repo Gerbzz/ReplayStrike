@@ -1,8 +1,10 @@
-# ReplayStrike
+# replaystrike
 
 Find the game clips already on your PC, make them look great, and share them in seconds.
 
-ReplayStrike looks for clips from NVIDIA Instant Replay / Highlights, Xbox Game Bar, AMD ReLive, Medal and Outplayed, plus anything in your Videos folder. You can add other folders in **Folders & accounts**. It never records anything and never changes your original clips; edits are saved as new files in `Videos\ReplayStrike`.
+**Status:** Windows source prototype. The repository contains clip scanning, editing/export, reel, local analysis, and sharing paths, but this publication pass did not build the app or verify those workflows on a clean machine. No installer or downloaded media engine is included in Git.
+
+replaystrike looks for clips from NVIDIA Instant Replay / Highlights, Xbox Game Bar, AMD ReLive, Medal and Outplayed, plus anything in your Videos folder. You can add other folders in **Folders & accounts**. It never records anything and never changes your original clips; edits are saved as new files in `Videos\ReplayStrike`.
 
 ## Finding things
 
@@ -36,13 +38,13 @@ Hover a clip and tick the circle (or Ctrl+click) to select several, then **Creat
 | Copy for Discord | Compresses the edit to 10, 50 or 500 MB and copies the file, ready to paste | Yes |
 | Send to YouTube | Prepares the file and opens YouTube's upload page | Yes, once uploaded |
 
-Streamable needs a free account (email and password, entered once in **Folders & accounts**). Free accounts allow 250 MB and 10 minutes per video and Streamable deletes free videos after about 90 days. Bigger edits are compressed to fit automatically.
+Streamable needs an account (email and password, entered in **Folders & accounts**). Check its current upload limits and retention terms before sharing; the app can compress larger edits.
 
-YouTube is a hand-off rather than a direct upload because YouTube locks videos uploaded through its API by unaudited apps to private.
+The YouTube action prepares a file and opens the upload page; it does not upload directly.
 
 ## Run from source
 
-ReplayStrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
+replaystrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
 
 ```bash
 npm install
@@ -58,7 +60,7 @@ npm run dev
 npm run build
 ```
 
-The result is `src-tauri/target/release/bundle/nsis/ReplayStrike_0.3.0_x64-setup.exe`: a per-user installer with ffmpeg included, for 64-bit Windows 10/11. `npm run icons` regenerates the app icons from `build/icon.png`.
+The build is configured for a per-user NSIS installer at `src-tauri/target/release/bundle/nsis/ReplayStrike_0.3.0_x64-setup.exe` on 64-bit Windows 10/11. Its output was not verified in this publication pass. `npm run icons` regenerates the app icons from `build/icon.png`.
 
 ## Layout
 
@@ -78,7 +80,7 @@ Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStri
 
 ## Hype moments and auto montage
 
-Open a clip and press **Find hype moments**. ReplayStrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
+Open a clip and press **Find hype moments**. replaystrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
 
 Select one or more clips and press **Auto montage** to analyse them all, keep the strongest moments across them and join those into one video, in the order they happened.
 
