@@ -1,10 +1,20 @@
 # ReplayStrike
 
-Find the game clips already on your PC, make them look great, and share them in seconds.
+**by PWDS**
 
-**Status:** Windows source prototype. The repository contains clip scanning, editing/export, reel, local analysis, and sharing paths, but this publication pass did not build the app or verify those workflows on a clean machine. No installer or downloaded media engine is included in Git.
+**Give your best moments a second look.**
 
-ReplayStrike looks for clips from NVIDIA Instant Replay / Highlights, Xbox Game Bar, AMD ReLive, Medal and Outplayed, plus anything in your Videos folder. You can add other folders in **Folders & accounts**. It never records anything and never changes your original clips; edits are saved as new files in `Videos\ReplayStrike`.
+ReplayStrike gathers existing game recordings from common Windows clip folders into a personal library. Trim and style a favorite, combine clips into a reel, or prepare a file or link to share while keeping the original recordings intact.
+
+### Highlights
+
+- Find clips from common recorders and folders you add.
+- Trim, style, and combine clips into highlight reels.
+- Prepare exports for Discord, Streamable, or YouTube.
+
+## Current status
+
+Windows source prototype. Clip scanning, edit/export, reel, local analysis, and sharing paths exist in source, but this publication has not been built or verified end to end on a clean machine. FFmpeg and the optional local speech engine are fetched separately; no verified installer is included.
 
 ## Finding things
 
