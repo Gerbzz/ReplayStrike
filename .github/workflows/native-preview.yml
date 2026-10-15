@@ -15,6 +15,9 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
+      # This source-only preview uses ffmpeg/ffprobe from PATH. Production bundle
+      # sidecars and Whisper assets are not present in the public source tree.
+      TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":null}}'
     steps:
       - uses: actions/checkout@v4
       - name: Select stable Rust
