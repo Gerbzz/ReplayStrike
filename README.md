@@ -11,6 +11,10 @@
 
 ReplayStrike gathers existing game recordings from common Windows clip folders into a personal library. Trim and style a favorite, combine clips into a reel, or prepare a file or link to share while keeping the original recordings intact.
 
+![ReplayStrike native desktop library displaying one synthetic video clip](assets/screenshots/replaystrike-native-current.png)
+
+*Native Windows library preview captured on 15 October 2026 from the tested [draft preview branch](https://github.com/Gerbzz/ReplayStrike/pull/1). The card contains a generated six-second video, not a user's recording. [Capture provenance and limits](docs/NATIVE_UI_PREVIEW.md).*
+
 ## Highlights
 
 - Find clips from common recorders and folders you add.
@@ -19,7 +23,7 @@ ReplayStrike gathers existing game recordings from common Windows clip folders i
 
 ## Current status
 
-Windows source prototype. Clip scanning, edit/export, reel, local analysis, and sharing paths exist in source, but this publication has not been built or verified end to end on a clean machine. FFmpeg and the optional local speech engine are fetched separately; no verified installer is included.
+Windows source prototype. Clip scanning, edit/export, reel, local analysis, and sharing paths exist in source. A draft branch passed a hosted native build and one isolated-source test; its executable rendered the synthetic library preview above on the Office PC. The main branch itself has not been freshly built or verified end to end on a clean machine. FFmpeg and the optional local speech engine are fetched separately; no verified installer is included.
 
 ## Finding things
 
