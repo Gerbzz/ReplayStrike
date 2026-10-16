@@ -46,6 +46,8 @@ struct AppState {
     watcher: Mutex<Option<(RecommendedWatcher, Vec<PathBuf>)>>,
     /// Bumped by every scan so an older thumbnail queue stops early.
     scan_gen: AtomicU64,
+    /// Opt-in isolated source root for synthetic native-window previews.
+    capture_root: Option<PathBuf>,
 }
 
 type State = Arc<AppState>;
@@ -64,6 +66,17 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 struct ScanResult {
     sources: Vec<detect::Source>,
     clips: Vec<Clip>,
+}
+
+fn capture_sources(root: &Path) -> Vec<detect::Source> {
+    let clips = root.join("clips");
+    vec![detect::Source {
+        label: "Synthetic clips".into(),
+        exists: clips.is_dir(),
+        path: clips.to_string_lossy().into_owned(),
+        kind: "user",
+        count: 0,
+    }]
 }
 
 /// Exports made before records were kept: read the kind and source name back
@@ -94,10 +107,14 @@ fn infer_export(name: &str) -> (Option<String>, Option<String>) {
 #[tauri::command]
 async fn scan(app: AppHandle) -> Result<ScanResult, String> {
     let st = state(&app);
-    let videos = app.path().video_dir().map_err(err)?;
-    let folders: Vec<String> = st.config.get_as("folders");
+    let capture_root = st.capture_root.clone();
+    let videos = if capture_root.is_none() { Some(app.path().video_dir().map_err(err)?) } else { None };
+    let folders: Vec<String> = if capture_root.is_none() { st.config.get_as("folders") } else { Vec::new() };
     let (sources, mut clips) = tauri::async_runtime::spawn_blocking(move || {
-        let mut sources = detect::detect_sources(&videos, &folders);
+        let mut sources = match capture_root {
+            Some(root) => capture_sources(&root),
+            None => detect::detect_sources(videos.as_ref().expect("normal video directory"), &folders),
+        };
         let clips = library::scan_files(&mut sources);
         (sources, clips)
     })
@@ -789,9 +806,22 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let data = app.path().data_dir()?.join("ReplayStrike");
+            let capture_root = std::env::var_os("REPLAYSTRIKE_CAPTURE_ROOT").map(PathBuf::from);
+            if capture_root.as_ref().is_some_and(|root| !root.is_absolute()) {
+                return Err(std::io::Error::other("REPLAYSTRIKE_CAPTURE_ROOT must be absolute").into());
+            }
+            if let Some(root) = &capture_root {
+                std::fs::create_dir_all(root.join("clips"))?;
+            }
+            let data = match &capture_root {
+                Some(root) => root.join("data"),
+                None => app.path().data_dir()?.join("ReplayStrike"),
+            };
             let thumbs = data.join("thumbs-v2");
-            let exports = app.path().video_dir()?.join("ReplayStrike");
+            let exports = match &capture_root {
+                Some(root) => root.join("exports"),
+                None => app.path().video_dir()?.join("ReplayStrike"),
+            };
             std::fs::create_dir_all(&thumbs)?;
             let scope = app.asset_protocol_scope();
             let _ = scope.allow_directory(&thumbs, false);
@@ -820,11 +850,13 @@ fn main() {
                 analysis_lock: tokio::sync::Mutex::new(()),
                 thumbs,
                 exports,
-                temp: std::env::temp_dir().join("ReplayStrike"),
+                temp: capture_root.as_ref().map(|root| root.join("temp"))
+                    .unwrap_or_else(|| std::env::temp_dir().join("ReplayStrike")),
                 clips: Mutex::new(HashMap::new()),
                 music: Mutex::new(HashSet::new()),
                 watcher: Mutex::new(watcher.map(|w| (w, Vec::new()))),
                 scan_gen: AtomicU64::new(0),
+                capture_root,
             }));
             Ok(())
         })
@@ -857,4 +889,18 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReplayStrike");
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::capture_sources;
+
+    #[test]
+    fn preview_scans_only_its_synthetic_clips_folder() {
+        let root = std::env::temp_dir().join("replaystrike-preview-test");
+        let sources = capture_sources(&root);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].label, "Synthetic clips");
+        assert_eq!(std::path::PathBuf::from(&sources[0].path), root.join("clips"));
+    }
 }

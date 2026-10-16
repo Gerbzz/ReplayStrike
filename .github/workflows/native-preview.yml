@@ -1,0 +1,48 @@
+name: Isolated native preview executable
+
+on:
+  push:
+    branches: [feature/isolated-native-preview-2026-10-15]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      # This source-only preview uses ffmpeg/ffprobe from PATH. Production bundle
+      # sidecars and Whisper assets are not present in the public source tree.
+      TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":null}}'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select stable Rust
+        shell: pwsh
+        run: rustup default stable
+      - name: Test isolated preview source selection
+        shell: pwsh
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml preview_scans_only_its_synthetic_clips_folder
+      - name: Build native Tauri app
+        shell: pwsh
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml
+      - name: Bound and hash executable
+        shell: pwsh
+        run: |
+          $exe = Get-Item src-tauri/target/debug/replaystrike.exe
+          if ($exe.Length -gt 80MB) { throw "Debug executable exceeds 80 MiB cap: $($exe.Length)" }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "$sha  replaystrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
+          Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replaystrike-isolated-preview
+          path: |
+            src-tauri/target/debug/replaystrike.exe
+            artifact/SHA256.txt
+          if-no-files-found: error
+          retention-days: 1
