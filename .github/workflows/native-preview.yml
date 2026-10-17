@@ -85,7 +85,7 @@ jobs:
             }
             if ($handle -eq [IntPtr]::Zero) { throw 'No native app window became available' }
             [CaptureWindow]::ShowWindow($handle, 5) | Out-Null
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 4
             $rect = New-Object CaptureWindow+Rect
             if (-not [CaptureWindow]::GetWindowRect($handle, [ref]$rect)) { throw 'Cannot read app window bounds' }
             $width = $rect.Right - $rect.Left
@@ -137,6 +137,9 @@ jobs:
             Get-Content capture/native-capture.txt
             throw 'Native app screenshot unavailable; build and source tests are recorded in the build job'
           }
+          'PNG_BASE64_BEGIN'
+          [Convert]::ToBase64String([IO.File]::ReadAllBytes($path))
+          'PNG_BASE64_END'
           $bitmap = [System.Drawing.Bitmap]::FromFile($path)
           try {
             if ($bitmap.Width -lt 600 -or $bitmap.Height -lt 400) { throw 'Native image dimensions are too small' }
