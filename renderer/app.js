@@ -223,11 +223,12 @@ function renderGrid() {
     fillCard(card, clip);
     card.addEventListener('click', (ev) => (ev.ctrlKey || ev.shiftKey ? toggleSelected(clip) : openPlayer(clip)));
     card.addEventListener('keydown', (ev) => {
-      if (ev.target === card && (ev.key === 'Enter' || ev.key === ' ')) {
-        ev.preventDefault();
-        if (ev.ctrlKey || ev.shiftKey) toggleSelected(clip);
-        else openPlayer(clip);
-      }
+      if (ev.target !== card) return;
+      const action = LibraryState.cardKeyAction(ev);
+      if (!action) return;
+      ev.preventDefault();
+      if (action === 'select') toggleSelected(clip);
+      else openPlayer(clip);
     });
     attachHoverPreview(card, clip);
     cards.set(clip.path, card);
@@ -247,7 +248,9 @@ function renderGrid() {
     $('resultsText').textContent = searching
       ? `No clips in this view match “${state.query.trim()}”. Try another name or clear the search.`
       : VIEW_HINTS[state.view] || 'There are no clips in this view yet.';
-    $('resultsAction').textContent = searching ? 'Clear search' : 'Browse all clips';
+    $('resultsAction').textContent = searching
+      ? 'Clear search'
+      : LibraryState.recoveryView(state.clips) === 'all' ? 'Browse all clips' : 'Browse my edits';
   }
   $('heading').textContent = `${state.view === 'game' ? state.game : VIEW_NAMES[state.view]} (${list.length})`;
   renderSelection();
@@ -951,11 +954,11 @@ $('resultsAction').addEventListener('click', () => {
     $('search').focus();
     return;
   }
-  state.view = 'all';
+  state.view = LibraryState.recoveryView(state.clips);
   state.game = null;
   renderSidebar();
   renderGrid();
-  $('games').querySelector('[data-view="all"]').focus();
+  $('games').querySelector(`[data-view="${state.view}"]`).focus();
 });
 $('sort').addEventListener('change', (ev) => {
   state.sort = ev.target.value;
