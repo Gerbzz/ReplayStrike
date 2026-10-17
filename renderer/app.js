@@ -181,7 +181,9 @@ function renderSelection() {
   for (const [file, card] of cards) {
     const n = state.selected.indexOf(file);
     card.classList.toggle('selected', n >= 0);
-    card.querySelector('.pick').textContent = n >= 0 ? String(n + 1) : '';
+    const pick = card.querySelector('.pick');
+    pick.textContent = n >= 0 ? String(n + 1) : '';
+    pick.setAttribute('aria-pressed', String(n >= 0));
   }
   const count = state.selected.length;
   $('grid').classList.toggle('picking', count > 0);
@@ -208,7 +210,7 @@ function renderGrid() {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     const pick = el('button', 'pick');
-    pick.setAttribute('aria-label', 'Select for highlight reel');
+    pick.setAttribute('aria-label', `Select ${clip.name} for highlight reel`);
     pick.addEventListener('click', (ev) => {
       ev.stopPropagation();
       toggleSelected(clip);
@@ -223,7 +225,8 @@ function renderGrid() {
     card.addEventListener('keydown', (ev) => {
       if (ev.target === card && (ev.key === 'Enter' || ev.key === ' ')) {
         ev.preventDefault();
-        openPlayer(clip);
+        if (ev.ctrlKey || ev.shiftKey) toggleSelected(clip);
+        else openPlayer(clip);
       }
     });
     attachHoverPreview(card, clip);
