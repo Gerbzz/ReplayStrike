@@ -57,6 +57,19 @@ jobs:
             [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out Rect rect);
             [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(WindowCallback callback, IntPtr data);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+            public delegate bool WindowCallback(IntPtr handle, IntPtr data);
+            public static IntPtr FindWindow(int processId) {
+              IntPtr found = IntPtr.Zero;
+              EnumWindows((handle, data) => {
+                uint owner;
+                GetWindowThreadProcessId(handle, out owner);
+                if (owner == (uint)processId) { found = handle; return false; }
+                return true;
+              }, IntPtr.Zero);
+              return found;
+            }
           }
           '@
           Add-Type -TypeDefinition $signature
@@ -67,7 +80,7 @@ jobs:
             for ($try = 0; $try -lt 30; $try++) {
               Start-Sleep -Milliseconds 500
               $process.Refresh()
-              $handle = $process.MainWindowHandle
+              $handle = [CaptureWindow]::FindWindow($process.Id)
               if ($handle -ne [IntPtr]::Zero) { break }
             }
             if ($handle -eq [IntPtr]::Zero) { throw 'No native app window became available' }
