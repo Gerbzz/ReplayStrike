@@ -46,11 +46,57 @@ jobs:
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
           "$sha  replaystrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
           Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha"
+      - name: Attempt native app-window capture
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $signature = @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class CaptureWindow {
+            [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out Rect rect);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
+          }
+          '@
+          Add-Type -TypeDefinition $signature
+          $app = (Resolve-Path 'src-tauri/target/debug/replaystrike.exe').Path
+          $process = Start-Process -FilePath $app -PassThru -WindowStyle Hidden
+          try {
+            $handle = [IntPtr]::Zero
+            for ($try = 0; $try -lt 30; $try++) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              $handle = $process.MainWindowHandle
+              if ($handle -ne [IntPtr]::Zero) { break }
+            }
+            if ($handle -eq [IntPtr]::Zero) { throw 'No native app window became available' }
+            [CaptureWindow]::ShowWindow($handle, 5) | Out-Null
+            Start-Sleep -Seconds 2
+            $rect = New-Object CaptureWindow+Rect
+            if (-not [CaptureWindow]::GetWindowRect($handle, [ref]$rect)) { throw 'Cannot read app window bounds' }
+            $width = $rect.Right - $rect.Left
+            $height = $rect.Bottom - $rect.Top
+            if ($width -lt 600 -or $height -lt 400 -or $width -gt 3000 -or $height -gt 2000) { throw "Unexpected window size: ${width}x${height}" }
+            $bitmap = New-Object System.Drawing.Bitmap($width, $height)
+            try {
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              try { $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size) } finally { $graphics.Dispose() }
+              $bitmap.Save('artifact/replaystrike-native-window.png', [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $bitmap.Dispose() }
+            "App-window crop from exact commit $env:GITHUB_SHA; hosted Windows runner." | Set-Content artifact/native-capture.txt
+          } catch {
+            "Native app-window capture unavailable: $_" | Set-Content artifact/native-capture.txt
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: replaystrike-isolated-preview
           path: |
             src-tauri/target/debug/replaystrike.exe
             artifact/SHA256.txt
+            artifact/native-capture.txt
+            artifact/replaystrike-native-window.png
           if-no-files-found: error
           retention-days: 1
