@@ -223,12 +223,7 @@ function renderGrid() {
     fillCard(card, clip);
     card.addEventListener('click', (ev) => (ev.ctrlKey || ev.shiftKey ? toggleSelected(clip) : openPlayer(clip)));
     card.addEventListener('keydown', (ev) => {
-      if (ev.target !== card) return;
-      const action = LibraryState.cardKeyAction(ev);
-      if (!action) return;
-      ev.preventDefault();
-      if (action === 'select') toggleSelected(clip);
-      else openPlayer(clip);
+      LibraryState.handleCardKeydown(ev, card, () => toggleSelected(clip), () => openPlayer(clip));
     });
     attachHoverPreview(card, clip);
     cards.set(clip.path, card);
