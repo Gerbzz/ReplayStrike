@@ -22,7 +22,7 @@
   <main class="main">
     <header class="toolbar" data-tauri-drag-region>
       <h1 id="heading" data-tauri-drag-region>All clips</h1>
-      <input type="search" id="search" placeholder="Search clips" autocomplete="off">
+      <input type="search" id="search" placeholder="Search clips" aria-label="Search clips" autocomplete="off">
       <select id="sort" aria-label="Sort">
         <option value="new">Newest first</option>
         <option value="old">Oldest first</option>
@@ -36,7 +36,12 @@
         <button id="winClose" class="win-close" aria-label="Close"><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg></button>
       </div>
     </header>
-    <section class="grid" id="grid"></section>
+    <section class="grid" id="grid" aria-label="Clips"></section>
+    <section class="results-empty" id="resultsEmpty" hidden>
+      <h2 id="resultsHeading"></h2>
+      <p id="resultsText"></p>
+      <button class="btn" id="resultsAction"></button>
+    </section>
     <section class="empty" id="empty" hidden>
       <h2>No clips found yet</h2>
       <p id="emptyText"></p>
