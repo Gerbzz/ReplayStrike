@@ -3,6 +3,8 @@ name: Isolated native preview executable
 on:
   push:
     branches: [feature/isolated-native-preview-2026-10-15]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -20,6 +22,9 @@ jobs:
       TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":null}}'
     steps:
       - uses: actions/checkout@v4
+      - name: Check renderer syntax
+        shell: pwsh
+        run: node --check renderer/app.js
       - name: Select stable Rust
         shell: pwsh
         run: rustup default stable
