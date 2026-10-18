@@ -2,7 +2,7 @@ name: Isolated native preview executable
 
 on:
   push:
-    branches: [feature/isolated-native-preview-2026-10-15]
+    branches: [feature/isolated-native-preview-2026-10-15, codex/replaystrike-webview-capture-20261018]
   pull_request:
     branches: [main]
 
