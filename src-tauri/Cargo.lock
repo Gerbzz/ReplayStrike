@@ -3167,6 +3167,7 @@ name = "replaystrike"
 version = "0.3.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "futures-util",
  "keyring",
@@ -3182,6 +3183,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "trash",
+ "webview2-com",
  "winreg 0.52.0",
 ]
 
