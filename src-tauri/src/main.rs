@@ -782,6 +782,71 @@ async fn selftest(clips_dir: PathBuf, out_dir: PathBuf) -> Result<String, String
     Ok(log)
 }
 
+/// CI-only capture of the actual WebView2 compositor, independent of the runner desktop.
+fn request_native_webview_capture(app: AppHandle, output: PathBuf) {
+    use base64::Engine as _;
+
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(5));
+        let Some(window) = app.get_webview_window("main") else {
+            eprintln!("native capture: main webview unavailable");
+            app.exit(1);
+            return;
+        };
+        let callback_app = app.clone();
+        let invocation_app = app.clone();
+        let scheduled = window.with_webview(move |platform| {
+            let callback = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(
+                Box::new(move |status, response| {
+                    let saved = (|| -> Result<(), String> {
+                        status.map_err(|error| format!("WebView2 capture failed: {error}"))?;
+                        let response: Value = serde_json::from_str(&response).map_err(err)?;
+                        let encoded = response.get("data").and_then(Value::as_str)
+                            .ok_or("WebView2 returned no screenshot data")?;
+                        let png = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(err)?;
+                        if !png.starts_with(b"\\x89PNG\\r\\n\\x1a\\n") {
+                            return Err("WebView2 returned a non-PNG screenshot".into());
+                        }
+                        std::fs::write(&output, png).map_err(err)?;
+                        eprintln!("native WebView2 screenshot saved to {}", output.display());
+                        Ok(())
+                    })();
+                    if let Err(error) = saved {
+                        eprintln!("native capture: {error}");
+                        callback_app.exit(1);
+                    } else {
+                        callback_app.exit(0);
+                    }
+                    Ok(())
+                }),
+            );
+            let started = (|| -> Result<(), String> {
+                let core = unsafe { platform.controller().CoreWebView2() }.map_err(err)?;
+                let method = webview2_com::CoTaskMemPWSTR::from("Page.captureScreenshot");
+                let args = webview2_com::CoTaskMemPWSTR::from(
+                    r#"{"format":"png","fromSurface":true,"captureBeyondViewport":false}"#,
+                );
+                unsafe {
+                    core.CallDevToolsProtocolMethod(
+                        *method.as_ref().as_pcwstr(),
+                        *args.as_ref().as_pcwstr(),
+                        &callback,
+                    )
+                }.map_err(err)?;
+                Ok(())
+            })();
+            if let Err(error) = started {
+                eprintln!("native capture: {error}");
+                invocation_app.exit(1);
+            }
+        });
+        if let Err(error) = scheduled {
+            eprintln!("native capture could not access WebView2: {error}");
+            app.exit(1);
+        }
+    });
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--selftest") {
@@ -858,6 +923,14 @@ fn main() {
                 scan_gen: AtomicU64::new(0),
                 capture_root,
             }));
+            if let Some(path) = std::env::var_os("REPLAYSTRIKE_NATIVE_CAPTURE_PATH").map(PathBuf::from) {
+                if !path.is_absolute() || capture_root.as_ref().is_none_or(|root| !path.starts_with(root)) {
+                    return Err(std::io::Error::other(
+                        "REPLAYSTRIKE_NATIVE_CAPTURE_PATH must be inside absolute REPLAYSTRIKE_CAPTURE_ROOT"
+                    ).into());
+                }
+                request_native_webview_capture(app.handle().clone(), path);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
