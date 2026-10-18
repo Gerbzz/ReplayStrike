@@ -2,7 +2,9 @@ name: Isolated native preview executable
 
 on:
   push:
-    branches: [feature/isolated-native-preview-2026-10-15]
+    branches: [feature/isolated-native-preview-2026-10-15, codex/replaystrike-webview-capture-20261018]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -20,6 +22,12 @@ jobs:
       TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":null}}'
     steps:
       - uses: actions/checkout@v4
+      - name: Check renderer interactions and syntax
+        shell: pwsh
+        run: |
+          node --check renderer/app.js
+          node --check renderer/library-state.js
+          node --test tests/library-state.test.js
       - name: Select stable Rust
         shell: pwsh
         run: rustup default stable
@@ -38,6 +46,35 @@ jobs:
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
           "$sha  replaystrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
           Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha"
+      - name: Capture actual ReplayStrike WebView2 compositor
+        shell: pwsh
+        run: |
+          $folder = Join-Path $env:RUNNER_TEMP 'replaystrike-native-evidence'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          $env:REPLAYSTRIKE_CAPTURE_ROOT = $folder
+          $env:REPLAYSTRIKE_NATIVE_CAPTURE_PATH = Join-Path $folder 'replaystrike-native-window.png'
+          $app = (Resolve-Path 'src-tauri/target/debug/replaystrike.exe').Path
+          $stderr = Join-Path (Get-Location) 'artifact/native-stderr.txt'
+          $stdout = Join-Path (Get-Location) 'artifact/native-stdout.txt'
+          $process = Start-Process -FilePath $app -PassThru -RedirectStandardError $stderr -RedirectStandardOutput $stdout
+          try {
+            Wait-Process -Id $process.Id -Timeout 45 -ErrorAction Stop
+          } finally {
+            $process.Refresh()
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+          $process.Refresh()
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
+            throw "Native WebView2 capture exited $($process.ExitCode)"
+          }
+          if (-not (Test-Path -LiteralPath $env:REPLAYSTRIKE_NATIVE_CAPTURE_PATH)) {
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
+            throw 'Native WebView2 compositor produced no PNG'
+          }
+          Copy-Item -LiteralPath $env:REPLAYSTRIKE_NATIVE_CAPTURE_PATH -Destination 'artifact/replaystrike-native-window.png'
+          "Actual ReplayStrike WebView2 compositor at $env:GITHUB_SHA; isolated synthetic capture root." | Set-Content artifact/native-capture.txt
       - uses: actions/upload-artifact@v4
         with:
           name: replaystrike-isolated-preview
@@ -46,3 +83,44 @@ jobs:
             artifact/SHA256.txt
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replaystrike-native-image
+          path: |
+            artifact/native-capture.txt
+            artifact/replaystrike-native-window.png
+          if-no-files-found: error
+          retention-days: 1
+
+  capture-evidence:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: replaystrike-native-image
+          path: capture
+      - name: Verify native window image exists and contains rendered detail
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $path = Join-Path (Get-Location) 'capture/replaystrike-native-window.png'
+          if (-not (Test-Path -LiteralPath $path)) {
+            Get-Content capture/native-capture.txt
+            throw 'Native app screenshot unavailable; build and source tests are recorded in the build job'
+          }
+          'PNG_BASE64_BEGIN'
+          [Convert]::ToBase64String([IO.File]::ReadAllBytes($path))
+          'PNG_BASE64_END'
+          $bitmap = [System.Drawing.Bitmap]::FromFile($path)
+          try {
+            if ($bitmap.Width -lt 600 -or $bitmap.Height -lt 400) { throw 'Native image dimensions are too small' }
+            $colors = [System.Collections.Generic.HashSet[int]]::new()
+            for ($x = 40; $x -lt $bitmap.Width; $x += 47) {
+              for ($y = 40; $y -lt $bitmap.Height; $y += 47) {
+                [void]$colors.Add($bitmap.GetPixel($x, $y).ToArgb())
+              }
+            }
+            if ($colors.Count -lt 8) { throw "Native image lacks rendered detail: $($colors.Count) colors" }
+            "Image $($bitmap.Width)x$($bitmap.Height), sampled colors $($colors.Count), commit $env:GITHUB_SHA"
+          } finally { $bitmap.Dispose() }

@@ -106,7 +106,7 @@ function chipGroup(containerId, options, fx, key, onChange) {
 /* ---------- library ---------- */
 
 function visibleClips() {
-  const q = state.query.toLowerCase();
+  const q = state.query.trim().toLowerCase();
   const inView = {
     all: (c) => !c.mine,
     edits: (c) => c.mine,
@@ -181,7 +181,9 @@ function renderSelection() {
   for (const [file, card] of cards) {
     const n = state.selected.indexOf(file);
     card.classList.toggle('selected', n >= 0);
-    card.querySelector('.pick').textContent = n >= 0 ? String(n + 1) : '';
+    const pick = card.querySelector('.pick');
+    pick.textContent = n >= 0 ? String(n + 1) : '';
+    pick.setAttribute('aria-pressed', String(n >= 0));
   }
   const count = state.selected.length;
   $('grid').classList.toggle('picking', count > 0);
@@ -208,7 +210,7 @@ function renderGrid() {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     const pick = el('button', 'pick');
-    pick.setAttribute('aria-label', 'Select for highlight reel');
+    pick.setAttribute('aria-label', `Select ${clip.name} for highlight reel`);
     pick.addEventListener('click', (ev) => {
       ev.stopPropagation();
       toggleSelected(clip);
@@ -221,20 +223,30 @@ function renderGrid() {
     fillCard(card, clip);
     card.addEventListener('click', (ev) => (ev.ctrlKey || ev.shiftKey ? toggleSelected(clip) : openPlayer(clip)));
     card.addEventListener('keydown', (ev) => {
-      if (ev.target === card && (ev.key === 'Enter' || ev.key === ' ')) {
-        ev.preventDefault();
-        openPlayer(clip);
-      }
+      LibraryState.handleCardKeydown(ev, card, () => toggleSelected(clip), () => openPlayer(clip));
     });
     attachHoverPreview(card, clip);
     cards.set(clip.path, card);
     nodes.push(card);
   }
-  if (!list.length && !state.query && VIEW_HINTS[state.view]) nodes.push(el('p', 'hint', VIEW_HINTS[state.view]));
   grid.replaceChildren(...nodes);
-  const none = state.clips.length === 0;
-  grid.hidden = none;
-  $('empty').hidden = !none;
+  const noLibrary = state.clips.length === 0;
+  const noResults = !noLibrary && list.length === 0;
+  grid.hidden = noLibrary || noResults;
+  $('empty').hidden = !noLibrary;
+  $('resultsEmpty').hidden = !noResults;
+  if (noResults) {
+    const searching = Boolean(state.query.trim());
+    $('resultsHeading').textContent = searching
+      ? 'No matching clips'
+      : state.view === 'edits' ? 'No edited clips yet' : state.view === 'shared' ? 'No shared clips yet' : 'No original clips in this view';
+    $('resultsText').textContent = searching
+      ? `No clips in this view match “${state.query.trim()}”. Try another name or clear the search.`
+      : VIEW_HINTS[state.view] || 'There are no clips in this view yet.';
+    $('resultsAction').textContent = searching
+      ? 'Clear search'
+      : LibraryState.recoveryView(state.clips) === 'all' ? 'Browse all clips' : 'Browse my edits';
+  }
   $('heading').textContent = `${state.view === 'game' ? state.game : VIEW_NAMES[state.view]} (${list.length})`;
   renderSelection();
 }
@@ -921,6 +933,27 @@ document.querySelector('.toolbar').addEventListener('dblclick', (ev) => {
 $('search').addEventListener('input', (ev) => {
   state.query = ev.target.value;
   renderGrid();
+});
+$('search').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || !state.query) return;
+  ev.preventDefault();
+  state.query = '';
+  $('search').value = '';
+  renderGrid();
+});
+$('resultsAction').addEventListener('click', () => {
+  if (state.query.trim()) {
+    state.query = '';
+    $('search').value = '';
+    renderGrid();
+    $('search').focus();
+    return;
+  }
+  state.view = LibraryState.recoveryView(state.clips);
+  state.game = null;
+  renderSidebar();
+  renderGrid();
+  $('games').querySelector(`[data-view="${state.view}"]`).focus();
 });
 $('sort').addEventListener('change', (ev) => {
   state.sort = ev.target.value;
