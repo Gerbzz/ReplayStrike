@@ -26,6 +26,8 @@ trash = "5"
 arboard = "3"
 keyring = { version = "3", features = ["windows-native"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+base64 = "=0.22.1"
+webview2-com = "=0.39.1"
 
 [profile.release]
 opt-level = "s"
