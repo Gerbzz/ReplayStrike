@@ -804,7 +804,7 @@ fn request_native_webview_capture(app: AppHandle, output: PathBuf) {
                         let encoded = response.get("data").and_then(Value::as_str)
                             .ok_or("WebView2 returned no screenshot data")?;
                         let png = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(err)?;
-                        if !png.starts_with(b"\\x89PNG\\r\\n\\x1a\\n") {
+                        if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
                             return Err("WebView2 returned a non-PNG screenshot".into());
                         }
                         std::fs::write(&output, png).map_err(err)?;
