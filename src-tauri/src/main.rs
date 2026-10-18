@@ -921,7 +921,7 @@ fn main() {
                 music: Mutex::new(HashSet::new()),
                 watcher: Mutex::new(watcher.map(|w| (w, Vec::new()))),
                 scan_gen: AtomicU64::new(0),
-                capture_root,
+                capture_root: capture_root.clone(),
             }));
             if let Some(path) = std::env::var_os("REPLAYSTRIKE_NATIVE_CAPTURE_PATH").map(PathBuf::from) {
                 if !path.is_absolute() || capture_root.as_ref().is_none_or(|root| !path.starts_with(root)) {
