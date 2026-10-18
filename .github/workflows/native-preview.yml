@@ -46,63 +46,35 @@ jobs:
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
           "$sha  replaystrike.exe" | Set-Content artifact/SHA256.txt -Encoding ascii
           Write-Output "Executable bytes: $($exe.Length); SHA-256: $sha"
-      - name: Attempt native app-window capture
+      - name: Capture actual ReplayStrike WebView2 compositor
         shell: pwsh
         run: |
-          Add-Type -AssemblyName System.Drawing
-          $signature = @'
-          using System;
-          using System.Runtime.InteropServices;
-          public static class CaptureWindow {
-            [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
-            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out Rect rect);
-            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
-            [DllImport("user32.dll")] public static extern bool EnumWindows(WindowCallback callback, IntPtr data);
-            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
-            public delegate bool WindowCallback(IntPtr handle, IntPtr data);
-            public static IntPtr FindWindow(int processId) {
-              IntPtr found = IntPtr.Zero;
-              EnumWindows((handle, data) => {
-                uint owner;
-                GetWindowThreadProcessId(handle, out owner);
-                if (owner == (uint)processId) { found = handle; return false; }
-                return true;
-              }, IntPtr.Zero);
-              return found;
-            }
-          }
-          '@
-          Add-Type -TypeDefinition $signature
+          $folder = Join-Path $env:RUNNER_TEMP 'replaystrike-native-evidence'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          $env:REPLAYSTRIKE_CAPTURE_ROOT = $folder
+          $env:REPLAYSTRIKE_NATIVE_CAPTURE_PATH = Join-Path $folder 'replaystrike-native-window.png'
           $app = (Resolve-Path 'src-tauri/target/debug/replaystrike.exe').Path
-          $process = Start-Process -FilePath $app -PassThru -WindowStyle Hidden
+          $stderr = Join-Path (Get-Location) 'artifact/native-stderr.txt'
+          $stdout = Join-Path (Get-Location) 'artifact/native-stdout.txt'
+          $process = Start-Process -FilePath $app -PassThru -RedirectStandardError $stderr -RedirectStandardOutput $stdout
           try {
-            $handle = [IntPtr]::Zero
-            for ($try = 0; $try -lt 30; $try++) {
-              Start-Sleep -Milliseconds 500
-              $process.Refresh()
-              $handle = [CaptureWindow]::FindWindow($process.Id)
-              if ($handle -ne [IntPtr]::Zero) { break }
-            }
-            if ($handle -eq [IntPtr]::Zero) { throw 'No native app window became available' }
-            [CaptureWindow]::ShowWindow($handle, 5) | Out-Null
-            Start-Sleep -Seconds 4
-            $rect = New-Object CaptureWindow+Rect
-            if (-not [CaptureWindow]::GetWindowRect($handle, [ref]$rect)) { throw 'Cannot read app window bounds' }
-            $width = $rect.Right - $rect.Left
-            $height = $rect.Bottom - $rect.Top
-            if ($width -lt 600 -or $height -lt 400 -or $width -gt 3000 -or $height -gt 2000) { throw "Unexpected window size: ${width}x${height}" }
-            $bitmap = New-Object System.Drawing.Bitmap($width, $height)
-            try {
-              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-              try { $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size) } finally { $graphics.Dispose() }
-              $bitmap.Save('artifact/replaystrike-native-window.png', [System.Drawing.Imaging.ImageFormat]::Png)
-            } finally { $bitmap.Dispose() }
-            "App-window crop from exact commit $env:GITHUB_SHA; hosted Windows runner." | Set-Content artifact/native-capture.txt
-          } catch {
-            "Native app-window capture unavailable: $_" | Set-Content artifact/native-capture.txt
+            Wait-Process -Id $process.Id -Timeout 45 -ErrorAction Stop
           } finally {
+            $process.Refresh()
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
+          $process.Refresh()
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
+            throw "Native WebView2 capture exited $($process.ExitCode)"
+          }
+          if (-not (Test-Path -LiteralPath $env:REPLAYSTRIKE_NATIVE_CAPTURE_PATH)) {
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
+            throw 'Native WebView2 compositor produced no PNG'
+          }
+          Copy-Item -LiteralPath $env:REPLAYSTRIKE_NATIVE_CAPTURE_PATH -Destination 'artifact/replaystrike-native-window.png'
+          "Actual ReplayStrike WebView2 compositor at $env:GITHUB_SHA; isolated synthetic capture root." | Set-Content artifact/native-capture.txt
       - uses: actions/upload-artifact@v4
         with:
           name: replaystrike-isolated-preview
