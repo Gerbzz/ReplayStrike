@@ -1,35 +1,38 @@
-# ReplayStrike
-
 <p align="center">
   <a href="https://prowebdevsolutions.com"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/branding/PWDS-logo-orange.svg">
     <img src="assets/branding/PWDS-logo.png" alt="PWDS company logo" width="120">
   </picture></a>
 </p>
+<p align="center"><strong>Published by PWDS</strong></p>
+
+<h1 align="center">ReplayStrike</h1>
 
 **Give your best moments a second look.**
 
 ReplayStrike gathers existing game recordings from common Windows clip folders into a personal library. Trim and style a favorite, combine clips into a reel, or prepare a file or link to share while keeping the original recordings intact.
 
+## Current status
+
+Windows source prototype. Clip scanning, edit/export, reel, local analysis, and sharing paths exist in source. The isolated preview work in [PR #1](https://github.com/Gerbzz/ReplayStrike/pull/1) merged on 16 October 2026. FFmpeg and the optional local speech engine are fetched separately; no verified installer is included.
+
+## Screenshot
+
 ![ReplayStrike native desktop library displaying one synthetic video clip](assets/screenshots/replaystrike-native-current.png)
 
-*Native Windows library preview captured on 15 October 2026 from the tested [draft preview branch](https://github.com/Gerbzz/ReplayStrike/pull/1). The card contains a generated six-second video, not a user's recording. [Capture provenance and limits](docs/NATIVE_UI_PREVIEW.md).*
+*Native Windows library preview captured on 15 October 2026 from the historical [PR #1 preview source](https://github.com/Gerbzz/ReplayStrike/pull/1). The card contains a generated six-second video, not a user's recording. [Capture provenance and limits](docs/NATIVE_UI_PREVIEW.md).*
 
-## Highlights
+## Features
 
 - Find clips from common recorders and folders you add.
 - Trim, style, and combine clips into highlight reels.
 - Prepare exports for Discord, Streamable, or YouTube.
 
-## Current status
-
-Windows source prototype. Clip scanning, edit/export, reel, local analysis, and sharing paths exist in source. A draft branch passed a hosted native build and one isolated-source test; its executable rendered the synthetic library preview above on the Office PC. The main branch itself has not been freshly built or verified end to end on a clean machine. FFmpeg and the optional local speech engine are fetched separately; no verified installer is included.
-
-## Finding things
+### Finding things
 
 The sidebar splits the library three ways: **All clips** is your raw recordings, **My edits** is everything you saved, compressed for Discord, sent to YouTube or built as a reel (each labelled with how it was made), and **Shared links** is clips you uploaded to Streamable.
 
-## Make it pop
+### Make it pop
 
 Open a clip and use the panel on the right. The preview updates live, and every share button uses what you set.
 
@@ -45,11 +48,11 @@ Open a clip and use the panel on the right. The preview updates live, and every 
 
 Trim and slow-mo are remembered per clip.
 
-## Highlight reels
+### Highlight reels
 
 Hover a clip and tick the circle (or Ctrl+click) to select several, then **Create highlight reel**. Clips play in the order you picked them. Each uses its own trim and slow-mo; clips you have not trimmed contribute their last 15 seconds.
 
-## Sharing
+### Sharing
 
 | Button | What it does | Plays inline in Discord |
 | --- | --- | --- |
@@ -61,7 +64,7 @@ Streamable needs an account (email and password, entered in **Folders & accounts
 
 The YouTube action prepares a file and opens the upload page; it does not upload directly.
 
-## Hype moments and auto montage
+### Hype moments and auto montage
 
 Open a clip and press **Find hype moments**. ReplayStrike transcribes the clip on your PC and scores every moment from what is said (callouts, swearing, "no way", "oh my god") and from loudness spikes, so clips with no voice still get results. The best moments are listed with a quote, marked on the timeline, and **Auto highlight** trims to the top one with slow-mo on it. The transcript is under the list.
 
@@ -69,7 +72,9 @@ Select one or more clips and press **Auto montage** to analyse them all, keep th
 
 The speech model (about 141 MB) is downloaded the first time you use this and is kept in `%APPDATA%\ReplayStrike\models`. Nothing is uploaded; transcription runs locally with whisper.cpp. The model is English-only.
 
-## Run from source
+## Build and install
+
+### Run from source
 
 ReplayStrike is a Tauri 2 app: a Rust backend in `src-tauri/` and a plain HTML/CSS/JS interface in `renderer/`. You need Rust, the Visual Studio C++ Build Tools and Node (only for the Tauri CLI).
 
@@ -81,7 +86,7 @@ npm run dev
 
 `fetch-binaries.ps1` downloads ffmpeg, ffprobe and the whisper.cpp speech engine that the app bundles; they are too large to keep in git.
 
-## Build the installer
+### Build the installer
 
 ```bash
 npm run build
@@ -89,7 +94,11 @@ npm run build
 
 The build is configured for a per-user NSIS installer at `src-tauri/target/release/bundle/nsis/ReplayStrike_0.3.0_x64-setup.exe` on 64-bit Windows 10/11. Its output was not verified in this publication pass. `npm run icons` regenerates the app icons from `build/icon.png`.
 
-## Layout
+### Windows build path
+
+Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
+
+## Repository layout
 
 | Path | What it holds |
 | --- | --- |
@@ -101,10 +110,16 @@ The build is configured for a per-user NSIS installer at `src-tauri/target/relea
 | `src-tauri/src/store.rs` | JSON settings storage |
 | `renderer/bridge.js` | The only place the interface talks to Rust |
 
-## Building on Windows
+## Validation status
 
-Keep the project at a path without an apostrophe (for example `C:\Dev\ReplayStrike`). Tauri's Windows resource step fails with `RC2135: file not found` when the path contains one, and drive-letter mappings do not work around it.
+The [recorded Windows preview run](https://github.com/Gerbzz/ReplayStrike/actions/runs/38705051223) passed one isolated-source test and built a source-only native executable, with production packaging sidecars and speech resources omitted. That executable rendered the synthetic library preview above on the Office PC. The evidence verifies launch, isolated clip discovery, metadata/thumbnail generation, and the visible library state for that checkpoint.
 
-## PWDS brand artwork
+Editing, exports, speech analysis, sharing, installer packaging, and clean-machine operation were not verified by that preview. It is not a fresh end-to-end validation of current main. See [capture provenance and limits](docs/NATIVE_UI_PREVIEW.md).
 
-The company mark in this masthead is the existing [official PWDS logo](https://github.com/Gerbzz/PWDS-Website/blob/main/public/prowebdevsolutions-logo.png), with the [official orange display asset](https://prowebdevsolutions.com/images/prowebdevsolutions-logo-orange.svg) for dark backgrounds. Any app logo above it remains the original Strike suite artwork.
+## Credits and licenses
+
+ReplayStrike credits Gerbzz as author in [package.json](package.json) and [Cargo.toml](src-tauri/Cargo.toml); both manifests declare MIT. This checkout has no standalone license file. The app uses Tauri, FFmpeg, and whisper.cpp; their own licenses and distribution obligations apply.
+
+### PWDS publisher artwork
+
+The company mark in this masthead is the existing [official PWDS logo](https://github.com/Gerbzz/PWDS-Website/blob/main/public/prowebdevsolutions-logo.png), with the [official orange display asset](https://prowebdevsolutions.com/images/prowebdevsolutions-logo-orange.svg) for dark backgrounds. This is PWDS publisher artwork, not a ReplayStrike app logo.
