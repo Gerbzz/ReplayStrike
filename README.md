@@ -12,6 +12,12 @@
 
 ReplayStrike gathers existing game recordings from common Windows clip folders into a personal library. Trim and style a favorite, combine clips into a reel, or prepare a file or link to share while keeping the original recordings intact.
 
+## Rust direction and migration status
+
+- **Target:** Develop a Rust-native replay and highlight application, extending the existing Rust backend and migrating remaining application logic while preserving clip-library, editing, and sharing workflows.
+- **Current implementation:** Published `main` uses a Rust/Tauri backend in [`src-tauri/`](src-tauri/) with an HTML/CSS/JavaScript interface in [`renderer/`](renderer/); FFmpeg and whisper.cpp are separate native components, not Rust implementations.
+- **Remaining migration:** The non-Rust interface and external media/speech components remain explicit migration boundaries. End-to-end editing/export, analysis, sharing, and clean-machine packaging need verification; the existing preview is not complete recording/replay product acceptance.
+
 ## Current status
 
 Windows source prototype. Clip scanning, edit/export, reel, local analysis, and sharing paths exist in source. The isolated preview work in [PR #1](https://github.com/Gerbzz/ReplayStrike/pull/1) merged on 16 October 2026. FFmpeg and the optional local speech engine are fetched separately; no verified installer is included.
