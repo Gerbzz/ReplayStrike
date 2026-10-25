@@ -27,7 +27,7 @@ jobs:
         run: |
           node --check renderer/app.js
           node --check renderer/library-state.js
-          node --test tests/library-state.test.js
+          node --test tests/library-state.test.js tests/branding.test.js
       - name: Select stable Rust
         shell: pwsh
         run: rustup default stable
