@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="build/icon.png" alt="ReplayStrike logo" width="160" height="160">
+</p>
+
+<p align="center">
   <a href="https://prowebdevsolutions.com"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/branding/PWDS-logo-orange.svg">
     <img src="assets/branding/PWDS-logo.png" alt="PWDS company logo" width="120">
